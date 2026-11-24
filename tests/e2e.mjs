@@ -846,6 +846,14 @@ async function run(mode) {
   const contactId = () => (pg.url().match(/#asc\/contact\/([^/]+)/) || [])[1];
   const contactOf = async (id) => (await source()).contacts.find((k) => k.id === id);
   const opt = (group, name) => pg.locator(`[aria-labelledby="${group}"]`).getByRole('button', { name, exact: true });
+  // Interactions start as a blank card; Add Interaction adds another. Typing a resource saves it.
+  const addIx = async (what, min) => {
+    if (!(await pg.locator('.asc-ix.is-draft').count())) { await pg.click('#asc-add-ix'); await pg.waitForTimeout(100); }
+    const id = await pg.locator('.asc-ix.is-draft').last().locator('input[id$="-what"]').getAttribute('id');
+    await pg.fill('#' + id, what); await pg.waitForTimeout(250);
+    if (min) await pg.fill('#' + id.replace(/-what$/, '-min'), String(min));
+    return id.replace(/^ix-|-what$/g, '');
+  };
   const fillIntake = async () => {
     await opt('q-safety', 'No').click(); await btn('Parent or guardian', true).click(); await btn('Child, 0–17', true).click();
     await pg.fill('#asc-story', 'Calling about her son, 6. Sent home from school twice this week.');
@@ -896,23 +904,42 @@ async function run(mode) {
     check('runs a call timer', /On call/.test(await text('.asc-live')));
     check('the header is short: IDs only, one tag, no save status', (await count('.client-head .tag')) === 1 && !(await text('.client-head')).includes('Coordinator') && !(await text('.client-head')).includes('saved'));
     check('History is hidden until there is history', (await count('.topbar button:has-text("History")')) === 0);
-    check('one way to look up a caller', (await count('#asc-btn-look')) === 1 && (await count('text=Returning Caller')) === 0);
+    check('one way to look up a returning caller', (await count('#asc-btn-look')) === 1 && (await text('#asc-btn-look')).includes('Returning Caller'));
     check('no reason-for-calling question', (await count('#h-reason')) === 0);
-    await btn('Look Up Caller', true).click();
-    await btn('Search', true).click();
-    check('lookup needs a reference number or a name', (await text('#asc-look-err')).includes('reference number, or a first or last name'));
-    await pg.fill('#asc-ref', '999999'); await btn('Search', true).click();
+    check('no caller’s name field: intake asks who the client is', (await count('#asc-caller-name')) === 0 && (await count('#asc-client-first')) === 1 && (await count('#asc-client-last')) === 1);
+    check('ages: transition-age youth is its own group, no overlap', (await pg.locator('[aria-labelledby="h-age"] button').allInnerTexts()).map((x) => x.trim()).join('|') === 'Child, 0–17|Transition-age youth, 18–25|Adult, 26–59|Older adult, 60+|Not sure');
+    check('age groups by date of birth', ASC.ageGroupFor('03/14/2020', new Date(2026, 10, 24)) === 'Child, 0–17' && ASC.ageGroupFor('2008-11-24', new Date(2026, 10, 24)) === 'Transition-age youth, 18–25' && ASC.ageGroupFor('2000-11-25', new Date(2026, 10, 24)) === 'Transition-age youth, 18–25' && ASC.ageGroupFor('2000-11-24', new Date(2026, 10, 24)) === 'Adult, 26–59' && ASC.ageGroupFor('1966-11-24', new Date(2026, 10, 24)) === 'Older adult, 60+');
+    for (const who of ['The client', 'Provider for their client', 'Other']) {
+      await opt('h-caller', who).click();
+      check('a detail box under “' + who + '”', (await count('#asc-caller-detail')) === 1 && (await text('label[for="asc-caller-detail"]')) === ASC.CALLER_DETAIL[who].label);
+    }
+    await opt('h-caller', 'Other').click();
+    check('and none when nothing is chosen', (await count('#asc-caller-detail')) === 0);
+    await btn('Returning Caller', true).click();
+    await btn('Look Up', true).click();
+    check('lookup needs a reference number', (await text('#asc-look-err')).includes('reference number'));
+    await pg.fill('#asc-ref', '999999'); await btn('Look Up', true).click();
     await pg.waitForSelector('#asc-look-err');
     check('an unknown reference number says so', (await text('#asc-look-err')).includes('No contact has that reference number'));
-    await pg.fill('#asc-ref', '142'); await btn('Search', true).click();
+    await pg.fill('#asc-ref', '142'); await btn('Look Up', true).click();
     await pg.waitForSelector('.asc-found');
     await btn('Attach and View', true).click();
     await pg.waitForSelector('.modal .asc-history');
+    await pg.waitForSelector('.modal .asc-open', { timeout: 3000 }).catch(() => {});
     check('previous interactions: open items first', (await text('.modal .asc-open')).includes('Mental health services for a child'));
     check('and both earlier contacts', (await count('.modal .asc-event')) === 2 && (await text('.modal')).includes('Dana Whitfield'));
     await btn('Done', true).click();
     check('History shows once there is some', (await count('.topbar button:has-text("History")')) === 1);
     await fillIntake();
+    await pg.fill('#asc-caller-detail', 'Maria, his mother');
+    await pg.fill('#asc-found-detail', 'Counselor at his school');
+    check('a detail box under how they found us', (await text('label[for="asc-found-detail"]')).startsWith('Which school'));
+    check('anonymous contact info and demographics can be entered', (await count('#asc-reach-phone')) === 1 && (await count('#asc-reach-email')) === 1 && (await count('#asc-demo-gender')) === 0);
+    await pg.fill('#asc-reach-zip', '15210');
+    await btn('Show Demographics', true).click();
+    check('demographics are behind a toggle', (await count('#asc-demo-gender')) === 1 && (await count('#asc-demo-race')) === 1);
+    await pg.selectOption('#asc-demo-language', 'Spanish');
+    await btn('Hide Demographics', true).click();
     check('screening answers are Yes, No and Skip', (await pg.locator('[aria-labelledby="q-mh"] button').allInnerTexts()).map((x) => x.trim()).join() === 'Yes,No,Skip');
     check('a concern adds its need straight away', (await count('.asc-needs li')) === 2 && (await text('.asc-needs')).includes('Food or other benefits') && (await count('text=Add Need:')) === 0);
     await pg.waitForTimeout(900);
@@ -921,11 +948,14 @@ async function run(mode) {
     check('answers are saved', (await pg.inputValue('#asc-story')).startsWith('Calling about her son') && (await btn('School', true).getAttribute('aria-pressed')) === 'true');
     const saved = await contactOf(kid);
     check('in the data', saved.screening.food === 'Sometimes' && saved.needs.length === 2 && saved.priorRefs.length === 2);
+    check('details, contact info and demographics are saved on the contact', saved.intake.callerDetail === 'Maria, his mother' && saved.intake.foundDetail === 'Counselor at his school' && saved.reach.zip === '15210' && saved.demo.language === 'Spanish' && saved.reach.phone === null);
   });
 
   await part('ASC: identify and enroll', async () => {
     await pg.getByRole('button', { name: 'Next: Identify' }).click();
     await pg.waitForSelector('#h-lookup');
+    check('the search starts with what intake has', (await pg.inputValue('#i-zip')) === '15210');
+    await pg.fill('#i-zip', '');
     await btn('Search MCI', true).click();
     check('search needs a name or date of birth', (await count('text=Enter a name or date of birth to search.')) === 1);
     await pg.fill('#i-first', 'Jayden'); await pg.fill('#i-last', 'Ruiz'); await pg.fill('#i-dob', '2020-03-14');
@@ -945,17 +975,21 @@ async function run(mode) {
     check('their notes moved to his record', db.notes.filter((n) => n.clientId === 'c65' && n.tag === 'ASC').length >= 2);
     check('the header shows him', (await text('.client-head h1')) === 'Jayden Ruiz' && (await text('.topbar')).includes('Jayden Ruiz'));
     check('the client panel takes over', (await count('aside.panel .private-pill')) === 0 && (await text('aside.panel')).includes('Case Notes'));
+    check('found on Identify, the step stays', (await count('.asc-step')) === 4 && k.identifiedIn === 'identify');
+    check('a ZIP that matches what’s on file isn’t a new address', !c.addresses.some((a) => /^asc-/.test(a.id)));
   });
 
   await part('ASC: interactions, reminders and follow-ups', async () => {
     check('needs and screening aren’t repeated here', (await count('.asc-needbar')) === 0 && (await count('#h-scr')) === 0);
-    await pg.fill('#asc-custom-ix', 'IBHS evaluation info'); await btn('Add', true).click();
-    await pg.waitForTimeout(150);
-    check('a new interaction focuses its minutes', await pg.evaluate(() => /-min$/.test(document.activeElement.id)));
-    await pg.keyboard.type('19');
+    check('no empty state: a blank interaction is ready to fill in', (await count('.asc-ix.is-draft')) === 1 && (await count('.asc-empty')) === 0 && (await count('#asc-custom-ix')) === 0);
+    check('Add Interaction sits by the heading', (await pg.locator('#h-ix').locator('xpath=ancestor::div[contains(@class,"asc-section-head")]').locator('#asc-add-ix').count()) === 1);
+    check('the blank card isn’t saved', (await contactOf(kid)).interactions.length === 0);
+    await addIx('IBHS evaluation info', 19);
     check('a common resource fills in its details', (await pg.inputValue('.asc-ix >> nth=0 >> input[id$="-what"]')).includes('IBHS') && (await pg.inputValue('.asc-ix >> nth=0 >> select[id$="-need"]')) === 'Mental health services for a child');
-    await pg.fill('#asc-custom-ix', '211'); await btn('Add', true).click(); await pg.waitForTimeout(150); await pg.keyboard.type('8');
-    check('one interaction per resource', (await count('.asc-ix')) === 2);
+    await pg.click('#asc-add-ix'); await pg.waitForTimeout(150);
+    check('Add Interaction opens a blank card and focuses it', (await count('.asc-ix.is-draft')) === 1 && await pg.evaluate(() => /-what$/.test(document.activeElement.id) && !!document.activeElement.closest('.is-draft')));
+    await addIx('211', 8);
+    check('one interaction per resource', (await count('.asc-ix')) === 2 && (await contactOf(kid)).interactions.length === 2);
     check('units show beside minutes', (await pg.locator('.asc-units').allInnerTexts()).join() === '1 unit,1 unit');
     check('place defaults to Telephone', (await pg.inputValue('.asc-ix >> nth=0 >> select[id$="-place"]')) === 'Telephone [code TBD]');
     check('placeholders aren’t shown in dropdowns', !(await text('.asc-ix')).includes('[code TBD]') && !(await text('.asc-ix')).includes('Ready for state reporting'));
@@ -994,11 +1028,16 @@ async function run(mode) {
     await btn('Show What’s Sent', true).click();
     check('the state table has a row per interaction', (await count('.table[aria-label="What goes to the state"] .tr.is-row')) === 2);
     check('one list of what to check, with Go to Step', (await count('.asc-checks li')) >= 1 && (await count('.asc-checks button:has-text("Go to Step")')) === (await count('.asc-checks li.is-error, .asc-checks li.is-warn')));
+    const sels = pg.locator('.asc-outcomes select');
+    await pg.waitForTimeout(600);
+    check('outcomes are filled in from the interactions: an open reminder keeps a need open, a warm transfer is Connected', (await sels.nth(0).inputValue()) === 'Still open' && (await sels.nth(1).inputValue()) === 'Connected');
+    check('and say why', (await pg.locator('.asc-suggested').allInnerTexts()).join('|').includes('Warm transfer to 211'));
+    check('short outcome names', (await sels.nth(0).locator('option').allInnerTexts()).join() === 'Choose an outcome,Still open,Info given,Connected,Handed off,Sent to crisis,Couldn’t help,Declined');
+    await sels.nth(1).selectOption(''); await pg.waitForTimeout(400);
+    check('clearing one keeps it clear', (await sels.nth(1).inputValue()) === '');
     await btn('Close Contact', true).click();
     check('closing needs an outcome for each need', (await text('.asc-foot')).includes('Choose an outcome') && (await pg.evaluate(() => document.activeElement.tagName)) === 'SELECT');
-    const sels = pg.locator('.asc-outcomes select');
-    check('short outcome names', (await sels.nth(0).locator('option').allInnerTexts()).join() === 'Choose an outcome,Still open,Info given,Connected,Handed off,Sent to crisis,Couldn’t help,Declined');
-    await sels.nth(0).selectOption('Still open'); await sels.nth(1).selectOption('Connected');
+    await sels.nth(1).selectOption('Connected');
     await btn('Close Contact', true).click();
     await pg.waitForSelector('.asc-closed');
     const k = await contactOf(kid);
@@ -1037,9 +1076,9 @@ async function run(mode) {
     await fillIntake();
     await pg.getByRole('link', { name: /Identify/ }).click();
     await btn('Stay Anonymous', true).click();
-    await pg.fill('#a-name', 'Rae'); await pg.fill('#a-zip', '15212');
+    await pg.fill('#a-name', 'Rae');
     await pg.getByRole('link', { name: /Interactions/ }).click();
-    await pg.fill('#asc-custom-ix', 'MATP'); await btn('Add', true).click(); await pg.waitForTimeout(150); await pg.keyboard.type('12');
+    await addIx('MATP', 12);
     check('in person, place defaults to Office', (await pg.inputValue('select[id$="-place"]')) === 'Office [code TBD]' && (await pg.inputValue('select[id$="-how"]')) === 'Number given');
     check('on-site steps', (await count('#h-onsite')) === 1);
     await opt('h-idc', 'Photo ID').click();
@@ -1420,13 +1459,20 @@ async function run(mode) {
     const ids = (rs) => rs.map((r) => r.provider.id);
     const meth = PS.searchProviders(dir, { service: 'mat-methadone' });
     check('search: methadone finds the opioid treatment programs', ids(meth).includes('tadiso') && ids(meth).includes('upmc-wbh') && meth.every((r) => r.sites.every((s) => s.services.every((x) => x.service === 'mat-methadone'))));
-    check('search: a need starts the search', PS.filtersFor('Mental health services for a child', 'Child, 0–17').service === 'mh-outpatient' && PS.filtersFor('Substance use treatment', 'Adult, 18–59').ages === 'adults');
+    check('search: a need starts the search', PS.filtersFor('Mental health services for a child', 'Child, 0–17').service === 'mh-outpatient' && PS.filtersFor('Substance use treatment', 'Adult, 26–59').ages === 'adults' && PS.filtersFor('Mental health, adult', 'Transition-age youth, 18–25').ages === 'transition-age-youth');
     const pregnant = PS.searchProviders(dir, { category: 'substance-use', population: 'mothers-with-children' });
     check('search: who they serve narrows it', ids(pregnant)[0] === 'sojourner-house');
     const inCounty = PS.searchProviders(dir, { service: 'sud-residential' });
     const anywhere = PS.searchProviders(dir, { service: 'sud-residential', inCounty: false });
     check('search: out-of-county programs only when asked', anywhere.length > inCounty.length && inCounty.every((r) => r.sites.every((s) => s.facility.inAlleghenyCounty)));
-    check('search: by town', PS.searchProviders(dir, { area: 'McKeesport' }).every((r) => r.sites.every((s) => /McKeesport/.test(s.facility.address.city + s.facility.name))));
+    check('search: text that isn’t a place still filters by address', PS.searchProviders(dir, { area: 'Fifth Avenue' }).every((r) => r.sites.every((s) => /Fifth Avenue/i.test(s.facility.address.line1 + s.facility.name))));
+    dir.zips = JSON.parse((await import('node:fs')).readFileSync(new URL('../data/zip-centroids.json', import.meta.url), 'utf8')).zips;
+    const all = PS.searchProviders(dir, { service: 'mh-outpatient' });
+    const near = PS.searchProviders(dir, { service: 'mh-outpatient', area: '15132' });
+    const miles = near.map((r) => r.miles).filter((m) => m != null);
+    check('search: a ZIP sorts by distance instead of filtering', near.length === all.length && miles.every((m, i) => !i || m >= miles[i - 1]) && near[0].sites[0].facility.address.city === 'McKeesport');
+    check('search: a town or neighborhood works too, in this part of the state', PS.placeFor(dir.zips, 'McKeesport') && PS.placeFor(dir.zips, 'Lawrenceville').lat < 40.6 && !PS.placeFor(dir.zips, 'Nowhere Town'));
+    check('search: distances read plainly', PS.milesText(0.4) === 'Under 1 mi' && PS.milesText(7.6) === 'About 8 mi' && Math.round(PS.milesBetween({ lat: 40.4406, lon: -79.9959 }, { lat: 40.3478, lon: -79.8642 })) === 9);
     check('search: sites not confirmed are kept, marked', PS.searchProviders(dir, { q: 'Wesley', service: 'family-based-mh' })[0].unsited.length === 1);
     const ref = PS.referralFrom(dir.providers.find((p) => p.id === 'tadiso'), dir.providers.find((p) => p.id === 'tadiso').facilities[0]);
     const note = ASCM.summaryNote({ channel: 'phone', startedAt: new Date().toISOString(), intake: {}, screening: {}, needs: [], interactions: [{ what: 'Methadone', type: 'Information and resources [code TBD]', how: 'Number given', min: '5', notes: '', referral: ref }], followUp: {}, onsite: { docs: [] }, clientId: '', identity: '', ref: 'EV-1' }, 'Logan Bialik');
@@ -1436,21 +1482,28 @@ async function run(mode) {
     await btn('New Phone Contact', true).click();
     await pg.waitForSelector('.asc-safety');
     const id = contactId();
-    await go(`#asc/contact/${id}/interactions`);
-    await pg.waitForSelector('#asc-find-provider');
-    await pg.click('#asc-find-provider');
+    check('started from a record: no Identify step', (await count('.asc-step')) === 3 && !(await pg.locator('.asc-steps, .asc-tabs').innerText()).includes('Identify'));
+    check('the age group comes from their date of birth', (await opt('h-age', ASC.ageGroupFor((await source()).clients.find((c) => c.id === 'c3').dob)).getAttribute('aria-pressed')) === 'true');
+    check('contact info starts as what’s on file', (await pg.inputValue('#asc-reach-street')).length > 0 && (await text('#h-reach')).length > 0);
+    await go(`#asc/contact/${id}/identify`);
+    await pg.waitForTimeout(300);
+    check('a link to Identify goes to Interactions', pg.url().endsWith('/interactions'));
+    const first = await pg.locator('.asc-ix.is-draft input[id$="-what"]').getAttribute('id');
+    const fid = first.replace(/^ix-|-what$/g, '');
+    await pg.click(`#ix-${fid}-find`);
     await pg.waitForSelector('.asc-pr-count');
+    check('the search starts near where they live', /^\d{5}$/.test(await pg.inputValue('#pr-area')) && (await text('.asc-pr-count')).includes('nearest to'));
     check('Find a Provider opens the directory, with crisis lines on top', (await text('.modal h2, .modal h1')).includes('Find a Provider') && (await text('.asc-pr-crisis')).includes('1-888-796-8226'));
     await pg.selectOption('#pr-service', 'mat-methadone');
     check('filtering by type of care', (await pg.locator('.asc-pr-name').allInnerTexts()).includes('Tadiso, Inc.'));
     await pg.fill('#pr-area', '15221');
-    check('and by ZIP', (await count('.asc-pr')) === 1 && (await text('.asc-pr')).includes('Narcotic Addiction Treatment Program'));
+    check('and sorted by distance from a ZIP', (await count('.asc-pr')) > 1 && (await pg.locator('.asc-pr').first().innerText()).includes('Narcotic Addiction Treatment Program') && (await count('.asc-pr-miles')) > 1);
     await pg.locator('.asc-pr-site').getByRole('button', { name: /^Refer to/ }).first().click();
     await pg.waitForSelector('.modal', { state: 'detached' });
     await pg.waitForSelector('.asc-ix');
     await pg.waitForTimeout(400);
     let k = await contactOf(id);
-    check('Refer Here starts an interaction with the referral', k.interactions.length === 1 && k.interactions[0].referral.providerId === 'upmc-wbh' && k.interactions[0].referral.facilityId === 'wph-natp' && k.interactions[0].what.startsWith('Referral: '));
+    check('Refer Here fills in the referral on the blank card, and saves it', k.interactions.length === 1 && k.interactions[0].id === fid && k.interactions[0].referral.providerId === 'upmc-wbh' && k.interactions[0].referral.facilityId === 'wph-natp' && k.interactions[0].what.startsWith('Referral: '));
     check('the referral is logged', k.log.some((l) => /^Referred to UPMC Western Behavioral Health/.test(l.text)));
     const ix = k.interactions[0].id;
     check('the card shows where they were referred, from the directory', (await pg.inputValue(`#ix-${ix}-ref`)).includes('Narcotic Addiction Treatment Program') && (await text(`#ix-${ix}-refd`)).includes('412-864-5300'));
@@ -1467,7 +1520,8 @@ async function run(mode) {
     await pg.waitForTimeout(900);
     k = await contactOf(id);
     check('a provider not in the directory can be typed in', k.interactions[0].referral.name === 'Dr. Lee, private practice' && !k.interactions[0].referral.providerId && (await count(`#ix-${ix}-refd`)) === 0);
-    await pg.click('#asc-find-provider');
+    await pg.click('#asc-add-ix'); await pg.waitForTimeout(100);
+    await pg.locator('.asc-ix.is-draft').getByRole('button', { name: 'Find a Provider' }).click();
     await pg.waitForSelector('.asc-pr-count');
     await pg.fill('#pr-other', 'Neighborhood counseling center');
     await btn('Use This Name', true).click();
@@ -1475,6 +1529,14 @@ async function run(mode) {
     await pg.waitForTimeout(400);
     k = await contactOf(id);
     check('or named from the search when it isn’t listed', k.interactions.length === 2 && k.interactions[1].referral.name === 'Neighborhood counseling center');
+    await pg.locator(`#ix-${k.interactions[1].id}-how`).selectOption('Warm transfer');
+    await pg.locator(`#ix-${k.interactions[1].id}-min`).fill('10');
+    await pg.waitForTimeout(700);
+    k = await contactOf(id);
+    check('suggested outcome: a warm transfer to the provider is Connected', ASC.suggestOutcome({ ...k, needs: [{ id: 'n', name: 'General' }] }, { id: 'n', name: 'General' }).outcome === 'Connected');
+    check('suggested outcome: a number given is Info given, a cold transfer Handed off', ASC.suggestOutcome({ ...k, needs: [{ name: 'X' }], interactions: [{ ...k.interactions[0], how: 'Number given', need: 'X' }] }, { name: 'X' }).outcome === 'Info given'
+      && ASC.suggestOutcome({ ...k, needs: [{ name: 'X' }], interactions: [{ ...k.interactions[0], how: 'Transferred', need: 'X' }] }, { name: 'X' }).outcome === 'Handed off');
+    check('suggested outcome: nothing to go on, nothing suggested', ASC.suggestOutcome({ ...k, needs: [{ name: 'X' }, { name: 'Y' }], interactions: [] }, { name: 'X' }) === null);
   });
 
   const openHistory = async () => { await go(`#asc/contact/${kid}/wrap-up`); await btn('History', true).click(); };
@@ -1507,14 +1569,27 @@ async function run(mode) {
     await btn('New Phone Contact', true).click();
     await pg.waitForSelector('.asc-safety');
     const id = contactId();
-    await btn('Look Up Caller', true).click(); await pg.waitForTimeout(100);
-    check('Look Up Caller focuses the reference number', (await pg.evaluate(() => document.activeElement.id)) === 'asc-ref');
+    await btn('Returning Caller', true).click(); await pg.waitForTimeout(100);
+    check('Returning Caller focuses the reference number', (await pg.evaluate(() => document.activeElement.id)) === 'asc-ref');
     await pg.locator('.asc-inline').getByRole('button', { name: 'Cancel' }).click(); await pg.waitForTimeout(150);
     check('Cancel returns focus to its button', (await pg.evaluate(() => document.activeElement.id)) === 'asc-btn-look');
-    await btn('Look Up Caller', true).click();
-    await pg.fill('#q-first', 'Jayden'); await pg.fill('#q-last', 'Ruiz'); await btn('Search', true).click();
-    await btn('Select Jayden Ruiz', true).click(); await pg.waitForTimeout(250);
+    await opt('h-caller', 'Parent or guardian').click();
+    await pg.fill('#asc-client-first', 'Jayden'); await pg.fill('#asc-client-last', 'Ruiz');
+    await pg.fill('#asc-reach-phone', '412-555-0177');
+    await pg.click('#asc-client-search');
+    await btn('Select Jayden Ruiz', true).click(); await pg.waitForTimeout(500);
     check('choosing a match moves focus to it', (await pg.evaluate(() => document.activeElement.id)) === 'h-match');
+    const found = await contactOf(id);
+    check('found in intake: on their record straight away, and no Identify step', found.clientId === 'c65' && found.identifiedIn === 'intake' && (await count('.asc-step')) === 3);
+    check('what’s on file fills in, with the change kept', (await pg.inputValue('#asc-reach-phone')) === '412-555-0177' && (await pg.inputValue('#asc-reach-street')).length > 0);
+    const rec = (await source()).clients.find((c) => c.id === 'c65').addresses.find((a) => a.id === 'asc-' + id);
+    check('the new phone is saved on their record as reported to ASC', !!rec && rec.phone.number === '412-555-0177' && rec.specificSources[0].code === 'ASC' && rec.sources[0] === 'OBH' && !rec.end);
+    await btn('Use What’s on File', true).click(); await pg.waitForTimeout(600);
+    check('Use What’s on File takes it back off', !(await source()).clients.find((c) => c.id === 'c65').addresses.some((a) => a.id === 'asc-' + id));
+    await pg.getByRole('button', { name: /Next: Interactions/ }).click();
+    await pg.waitForTimeout(200);
+    check('Next goes straight to Interactions', pg.url().endsWith('/interactions'));
+    await go(`#asc/contact/${id}/intake`); await pg.waitForSelector('.asc-safety');
     check('focusing never scrolls the app shell', await pg.evaluate(() => document.scrollingElement.scrollTop === 0 && document.scrollingElement.scrollHeight <= innerHeight + 1));
 
     // A save that fails for connection reasons keeps the typing and can be retried.
@@ -1548,12 +1623,12 @@ async function run(mode) {
       '#client/c1/overview dialog': async () => { await go('#client/c1/overview'); await btn('View Address Details').click(); await pg.locator('.modal .addr-toggle').nth(1).click(); },
       '#client/c1/address-history': async () => { await go('#client/c1/address-history'); await btn('Timeline').click(); await pg.locator('.addr-card .addr-toggle').first().click(); await pg.locator('.select-btn').click(); },
       '#client/c1/address-history table': async () => { await go('#client/c1/address-history'); await pg.keyboard.press('Escape'); await btn('Table').click(); await pg.locator('.addr-row').first().click(); },
-      'ASC intake': async () => { await go('#asc'); await btn('New Phone Contact', true).click(); await pg.waitForSelector('.asc-safety'); await btn('Look Up Caller', true).click(); await btn('Search', true).click(); },
+      'ASC intake': async () => { await go('#asc'); await btn('New Phone Contact', true).click(); await pg.waitForSelector('.asc-safety'); await btn('Returning Caller', true).click(); await btn('Look Up', true).click(); await opt('h-caller', 'Provider for their client').click(); await pg.fill('#asc-client-last', 'Nobodyhere'); await pg.click('#asc-client-search'); await btn('Show Demographics', true).click(); },
       'ASC identify': async () => { await pg.getByRole('link', { name: /Identify/ }).click(); await pg.fill('#i-last', 'Nobodyhere'); await btn('Search MCI', true).click(); await pg.waitForSelector('.asc-nomatch'); },
       'ASC new client': async () => { await btn('Register New Client', true).click(); await btn('Register and Enroll', true).click(); },
       'ASC anonymous': async () => { await btn('Back to Search', true).click(); await btn('Stay Anonymous', true).click(); },
-      'ASC provider search': async () => { await pg.getByRole('link', { name: /Interactions/ }).click(); await pg.locator('#asc-find-provider').click(); await pg.waitForSelector('.asc-pr-list'); },
-      'ASC interactions': async () => { await pg.keyboard.press('Escape'); await pg.waitForTimeout(100); await pg.getByRole('link', { name: /Interactions/ }).click(); await pg.fill('#asc-custom-ix', 'MATP'); await btn('Add', true).click(); await pg.locator('.asc-ix').first().getByRole('button', { name: 'Add Reminder' }).click(); },
+      'ASC provider search': async () => { await pg.getByRole('link', { name: /Interactions/ }).click(); await pg.locator('.asc-ix').first().getByRole('button', { name: 'Find a Provider' }).click(); await pg.waitForSelector('.asc-pr-list'); await pg.fill('#pr-area', '15132'); },
+      'ASC interactions': async () => { await pg.keyboard.press('Escape'); await pg.waitForTimeout(100); await pg.getByRole('link', { name: /Interactions/ }).click(); await addIx('MATP'); await pg.locator('.asc-ix').first().getByRole('button', { name: 'Add Reminder' }).click(); await pg.click('#asc-add-ix'); },
       'ASC wrap up': async () => { await pg.getByRole('link', { name: /Wrap Up/ }).click(); await btn('Close Contact', true).click(); },
       'ASC urgent dialog': async () => { await btn('Urgent Routing', true).click(); await pg.waitForSelector('.asc-dest'); },
       'ASC history dialog': async () => { await pg.keyboard.press('Escape'); await openHistory(); await pg.waitForSelector('.modal'); },
@@ -1613,7 +1688,7 @@ async function run(mode) {
     check('and keeps it', await pg.evaluate(() => !!document.activeElement.closest('.modal')));
     await pg.keyboard.press('Escape');
     check('Escape closes it and focus goes back', (await count('.modal')) === 0 && (await pg.evaluate(() => document.activeElement.textContent)).includes('Urgent Routing'));
-    await btn('Look Up Caller', true).click(); await btn('Cancel', true).click(); await pg.waitForTimeout(80);
+    await btn('Returning Caller', true).click(); await btn('Cancel', true).click(); await pg.waitForTimeout(80);
     check('closing a helper returns focus to its button', (await pg.evaluate(() => document.activeElement.id)) === 'asc-btn-look');
   });
 

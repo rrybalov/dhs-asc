@@ -98,8 +98,12 @@ export function createLocalSource() {
     decideCloseout: (id, body) => run((d) => api.decideCloseout(d, id, body), true).then(normalizeDischarge),
     dischargeClient: (clientId, body) => run((d) => api.dischargeClient(d, clientId, body), true).then(normalizeDischarge),
     getStateReport: (period) => run((d) => api.stateReport(d, period)).then(normalizeReport),
-    // Published as a static file next to the app, so it can be updated without a code change.
-    getProviderDirectory: () => fetch('data/bh-providers.json').then((r) => { if (!r.ok) throw new Error('The provider directory couldn’t be loaded.'); return r.json(); }).then(normalizeDirectory),
+    // Published as static files next to the app, so they can be updated without a code change. The ZIP centroids
+    // sort providers by distance; without them the search still works, by address text.
+    getProviderDirectory: () => Promise.all([
+      fetch('data/bh-providers.json').then((r) => { if (!r.ok) throw new Error('The provider directory couldn’t be loaded.'); return r.json(); }),
+      fetch('data/zip-centroids.json').then((r) => (r.ok ? r.json() : { zips: {} }), () => ({ zips: {} }))
+    ]).then(([dir, z]) => normalizeDirectory({ ...dir, zips: z.zips })),
     listReferrals: () => run((d) => api.listReferrals(d), true).then((l) => l.map(normalizeReferral)),
     getReferral: (id) => run((d) => api.getReferral(d, id)).then(normalizeReferral),
     setReferralStatus: (id, status) => run((d) => api.setReferralStatus(d, id, { status }), true).then(normalizeReferral),

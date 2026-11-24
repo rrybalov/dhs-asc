@@ -4,13 +4,16 @@
 import { SCREENING, CHANNELS, shown } from './asc.js';
 
 const INTAKE = {
-  safety: 'Safety', privacy: 'Where they’re talking', caller: 'Caller', callerOther: 'Caller', callerName: 'Caller’s name',
+  safety: 'Safety', privacy: 'Where they’re talking', caller: 'Caller', callerOther: 'Caller', callerName: 'Caller’s name', callerDetail: 'About the caller',
+  clientFirst: 'Client’s first name, as given', clientLast: 'Client’s last name, as given', foundDetail: 'How they found us, details',
   callerConfirmed: 'Guardian on file', age: 'Person who needs help', story: 'In their words', coverage: 'Coverage',
   coverageDetail: 'Coverage plan', coverageConfirmed: 'Coverage on file', found: 'How they found us', foundOther: 'How they found us',
   reason: 'Reason for calling', reasonText: 'Reason for calling'
 };
 // Free text: the log says it changed, and the record shows what it says now.
-const TEXT = ['story'];
+const TEXT = ['story', 'callerDetail', 'foundDetail'];
+const REACH = { street: 'street address', city: 'city', state: 'state', zip: 'ZIP', phone: 'phone', email: 'email' };
+const DEMO = { dob: 'date of birth', gender: 'gender', legalSex: 'legal sex', race: 'race', ethnicity: 'ethnicity', language: 'primary language', marital: 'marital status', living: 'living arrangement' };
 const FOLLOW = { ok: 'Follow-up permission', how: 'Best way to reach them', time: 'Best time' };
 const ANON = { name: 'First name or nickname', zip: 'ZIP', county: 'County', language: 'Language' };
 const MERGE_MS = 5 * 60 * 1000;
@@ -34,7 +37,7 @@ export function describePatch(k, patch) {
       const b = before[n.id];
       if (!b) add('need.' + n.id, 'Need added: ' + n.name + (n.urg ? ' (' + n.urg.toLowerCase() + ')' : ''));
       else {
-        if (n.outcome !== b.outcome) add('need.' + n.id + '.outcome', 'Outcome for ' + n.name + ': ' + val(n.outcome));
+        if (n.outcome !== b.outcome) add('need.' + n.id + '.outcome', 'Outcome for ' + n.name + (n.outcomeAuto ? ', filled in from the interactions' : '') + ': ' + val(n.outcome));
         if (n.urg !== b.urg) add('need.' + n.id + '.urg', 'Urgency for ' + n.name + ': ' + val(n.urg));
       }
       delete before[n.id];
@@ -68,6 +71,9 @@ export function describePatch(k, patch) {
     if (o.consentSigned && !k.onsite.consentSigned) add('onsite.consent', 'Consent to share signed');
     if (Array.isArray(o.docs)) o.docs.filter((d) => k.onsite.docs.indexOf(d) < 0).forEach((d) => add('onsite.doc.' + d, 'Document scanned: ' + d));
   }
+  // Contact info and demographics: the log says what changed, not the values (they're on the record).
+  if (patch.reach) Object.keys(REACH).forEach((f) => { if (f in patch.reach && patch.reach[f] !== k.reach[f]) add('reach.' + f, 'Contact info updated: ' + REACH[f]); });
+  if (patch.demo) Object.keys(DEMO).forEach((f) => { if (f in patch.demo && patch.demo[f] !== k.demo[f]) add('demo.' + f, 'Demographics updated: ' + DEMO[f]); });
   if (patch.anon) Object.keys(ANON).forEach((f) => { if (f in patch.anon && patch.anon[f] !== k.anon[f]) add('anon.' + f, 'Anonymous details, ' + ANON[f].toLowerCase() + ': ' + val(patch.anon[f])); });
   if ('channel' in patch && patch.channel !== k.channel) add('channel', 'Changed to ' + (CHANNELS[patch.channel] || '').toLowerCase());
   if ('site' in patch && patch.site !== k.site && patch.site) add('site', 'Site: ' + patch.site);

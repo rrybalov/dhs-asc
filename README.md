@@ -83,6 +83,7 @@ Every release is kept on its own branch, so nothing is lost:
 | `archive/v4.3` | Supervisor tools: close-out requests and discharge, reassignment, state reporting |
 | `archive/v4.4` | IPV High Risk Team Review; each CoLab's sidebar shows its own pages |
 | `archive/v4.5` | Find a Provider in the ASC Interactions step; "Referred to" on each interaction |
+| `archive/v4.6` | Intake asks who the client is, with contact info and demographics; 18–25 age group; no Identify step for known clients; blank interaction to start; providers sorted by distance; outcomes filled in |
 
 `CHANGELOG.md` lists what changed in each.
 

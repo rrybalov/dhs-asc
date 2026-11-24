@@ -10,7 +10,7 @@ import { navigate } from '../../router.jsx';
 import { isoToUS, todayISO } from '../../lib.js';
 import {
   IX_TYPES, PLACES, HOWS, PRESETS, FOLLOW_HOWS, needForScreen, howFor, defaultPlace, unitsFor, missingFor, totals, totalsText,
-  followUpPlan, weekday, usDate, minutesBetween, clockTime, shown, plural
+  followUpPlan, weekday, usDate, minutesBetween, clockTime, shown, plural, effective
 } from '../../data/asc.js';
 import { Options, Section, StepHeading, focusLater, removeWithUndo } from './parts.jsx';
 import { ProviderSearchModal } from './ProviderSearch.jsx';
@@ -70,23 +70,32 @@ function Reminders({ k, x, reminders }) {
   );
 }
 
-function InteractionCard({ k, x, num, edit, needs, reminders, isNew, onFind }) {
+// One interaction. A draft (a blank card nobody has typed in yet) isn't saved until something is filled in.
+function InteractionCard({ k, x, num, edit, save, needs, reminders, isNew, draft, onRemoveDraft, onFind, presets }) {
   const { toast } = useApi();
-  const set = (key, now) => (v) => edit({ interactions: k.interactions.map((y) => (y.id === x.id ? { ...y, [key]: v } : y)) }, now ? { now: true } : undefined);
+  const set = (key, now) => (v) => save({ ...x, [key]: v }, now);
+  // Picking a common resource from the list fills in its type and how.
+  const setWhat = (v) => {
+    const p = presets.find((y) => y.label.toLowerCase() === v.trim().toLowerCase());
+    if (!p) { set('what')(v); return; }
+    const need = p.need === 'MH' ? needForScreen({ need: 'MH' }, k.intake.age) : p.need;
+    save({ ...x, what: p.what, type: p.type, how: howFor(k.channel, p.how), need: needs.indexOf(need) >= 0 ? need : x.need }, true);
+  };
   const miss = missingFor(x);
   const units = unitsFor(x.min);
   const id = (s) => 'ix-' + x.id + '-' + s;
   const needOpts = ['General'].concat(needs); if (needOpts.indexOf(x.need) < 0) needOpts.push(x.need);
   const ready = !miss.length;
   return (
-    <li className={'asc-ix' + (ready ? '' : ' is-incomplete')}>
+    <li className={'asc-ix' + (ready || draft ? '' : ' is-incomplete') + (draft ? ' is-draft' : '')}>
       <div className="asc-ix-head">
         <span className="asc-ix-num" aria-hidden="true">{num}</span>
         <div className="field asc-ix-what">
           <label htmlFor={id('what')}>Resource or hand-off <span className="sr-only">for interaction {num}</span></label>
-          <input className="input" id={id('what')} value={x.what} onChange={(e) => set('what')(e.target.value)} />
+          <input className="input" id={id('what')} value={x.what} autoFocus={isNew} list="asc-presets" autoComplete="off" placeholder="Choose a common resource or type one" onChange={(e) => setWhat(e.target.value)} />
         </div>
-        <button type="button" className="icon-btn is-danger asc-icon-btn" aria-label={'Remove interaction ' + num + ': ' + x.what} onClick={() => { removeWithUndo(toast, edit, k, 'interactions', x, 'Interaction ' + num); focusLater('h-ix'); }}><Icon name="trash" size={16} /></button>
+        {draft ? (onRemoveDraft && <button type="button" className="icon-btn is-danger asc-icon-btn" aria-label={'Remove interaction ' + num} onClick={() => { onRemoveDraft(); focusLater('asc-add-ix'); }}><Icon name="trash" size={16} /></button>)
+          : <button type="button" className="icon-btn is-danger asc-icon-btn" aria-label={'Remove interaction ' + num + ': ' + x.what} onClick={() => { removeWithUndo(toast, edit, k, 'interactions', x, 'Interaction ' + num); focusLater('h-ix'); }}><Icon name="trash" size={16} /></button>}
       </div>
       <div className="asc-ix-grid">
         <div className="field"><label htmlFor={id('need')}>For which need</label>
@@ -97,7 +106,7 @@ function InteractionCard({ k, x, num, edit, needs, reminders, isNew, onFind }) {
           <select className="select" id={id('how')} value={x.how} onChange={(e) => set('how', true)(e.target.value)}>{HOWS.map((v) => <option key={v} value={v}>{shown(v)}</option>)}</select></div>
         <div className="field"><div className="field-top"><label htmlFor={id('min')}>Minutes</label><span className="req">Required</span></div>
           <div className="asc-min-row">
-            <input className="input" id={id('min')} type="number" min="1" inputMode="numeric" autoFocus={isNew} value={x.min} aria-invalid={!(Number(x.min) > 0) && k.status === 'closed'} aria-describedby={id('units')} onChange={(e) => set('min')(e.target.value)} />
+            <input className="input" id={id('min')} type="number" min="1" inputMode="numeric" value={x.min} aria-invalid={!(Number(x.min) > 0) && k.status === 'closed'} aria-describedby={id('units')} onChange={(e) => set('min')(e.target.value)} />
             <span className="asc-units" id={id('units')}>{units ? plural(units, 'unit', 'units') : '15 min = 1 unit'}</span>
           </div></div>
         <div className="field"><div className="field-top"><label htmlFor={id('place')}>Place of service</label><span className="req">Required</span></div>
@@ -106,7 +115,7 @@ function InteractionCard({ k, x, num, edit, needs, reminders, isNew, onFind }) {
       <div className="field asc-ix-ref">
         <div className="field-top"><label htmlFor={id('ref')}>Referred to</label><span className="asc-optional">Optional</span></div>
         <div className="asc-inline-row">
-          <input className="input" id={id('ref')} value={referralText(x.referral)} placeholder="The provider they were referred to"
+          <input className="input" id={id('ref')} value={referralText(x.referral)} placeholder="Find one in the directory, or type a name"
             aria-describedby={x.referral && x.referral.providerId ? id('refd') : undefined}
             onChange={(e) => set('referral')(e.target.value ? { providerId: '', facilityId: '', name: e.target.value, site: '', phone: '', address: '' } : null)} />
           <button type="button" className="btn-outline" id={id('find')} onClick={() => onFind(x)}><Icon name="search" />Find a Provider</button>
@@ -117,10 +126,12 @@ function InteractionCard({ k, x, num, edit, needs, reminders, isNew, onFind }) {
       </div>
       <div className="field"><label htmlFor={id('notes')}>Notes</label>
         <textarea className="input is-block" id={id('notes')} rows={2} value={x.notes} placeholder="What you told them and what happens next" onChange={(e) => set('notes')(e.target.value)} /></div>
-      <div className="asc-ix-foot">
-        <Reminders k={k} x={{ ...x, num, edit }} reminders={reminders} />
-        {!ready && <span className="asc-ix-status"><Icon name="alert" size={15} />Missing: {miss.join(', ')}</span>}
-      </div>
+      {!draft && (
+        <div className="asc-ix-foot">
+          <Reminders k={k} x={{ ...x, num, edit }} reminders={reminders} />
+          {!ready && <span className="asc-ix-status"><Icon name="alert" size={15} />Missing: {miss.join(', ')}</span>}
+        </div>
+      )}
     </li>
   );
 }
@@ -171,74 +182,63 @@ function OnSite({ k, edit }) {
 
 export function InteractionsStep({ k, edit, next }) {
   const { actions } = useData();
-  const [custom, setCustom] = useState('');
   const [justAdded, setJustAdded] = useState(null);
-  const [finder, setFinder] = useState(null); // { x } for an interaction, or { add: true } for a new one
+  const [finder, setFinder] = useState(null); // { x } for the interaction it was opened from
   const needs = k.needs.map((n) => n.name);
-  const add = (p, referral) => {
-    const need = p.need === 'MH' ? needForScreen({ need: 'MH' }, k.intake.age) : p.need;
-    const x = { id: uid('i'), what: p.what, need: needs.indexOf(need) >= 0 ? need : needs[0] || 'General', type: p.type, how: howFor(k.channel, p.how), min: '', place: defaultPlace(k.channel), notes: '', referral: referral || null };
-    setJustAdded(x.id); // its minutes field takes focus as soon as it appears
-    edit({ interactions: k.interactions.concat([x]) }, { now: true });
-  };
-  // One box: pick a common resource from the list, or type any other.
-  const submit = (e) => {
-    e.preventDefault();
-    const text = custom.trim();
-    if (!text) return;
-    const preset = PRESETS.find((p) => p.label.toLowerCase() === text.toLowerCase() || p.what.toLowerCase() === text.toLowerCase());
-    add(preset || { what: text, need: needs[0] || 'General', type: IX_TYPES[0], how: 'Number given' });
-    setCustom('');
-  };
-  // A provider picked from the directory goes on the interaction it was opened from, or starts a new interaction.
-  const picked = (referral, need) => {
-    if (finder && finder.x) {
-      edit({ interactions: k.interactions.map((y) => (y.id === finder.x.id ? { ...y, referral } : y)) }, { now: true });
-      focusLater('ix-' + finder.x.id + '-find');
-    } else {
-      add({ what: 'Referral: ' + referral.name + (referral.site && referral.site !== referral.name ? ', ' + referral.site : ''), need: need || needs[0] || 'General', type: IX_TYPES[0], how: 'Number given' }, referral);
-    }
+  // A new card starts on the first need nothing has been done for yet.
+  const blank = () => ({ id: uid('i'), what: '', need: needs.find((n) => !k.interactions.some((x) => x.need === n)) || needs[0] || 'General', type: IX_TYPES[0], how: howFor(k.channel, 'Number given'), min: '', place: defaultPlace(k.channel), notes: '', referral: null });
+  // Blank cards on screen that haven't been saved. With no interactions yet, there's always one to start typing in.
+  const [drafts, setDrafts] = useState(() => (k.interactions.length || k.status === 'closed' ? [] : [blank()]));
+  const saved = new Set(k.interactions.map((x) => x.id));
+  const pending = drafts.filter((d) => !saved.has(d.id));
+  const open = k.status === 'open' || !!k.correction;
+  // The first change to a draft saves it as an interaction.
+  const save = (y, now) => edit({ interactions: saved.has(y.id) ? k.interactions.map((z) => (z.id === y.id ? y : z)) : k.interactions.concat([y]) }, now ? { now: true } : undefined);
+  const addDraft = () => { const d = blank(); setDrafts(pending.concat([d])); setJustAdded(d.id); };
+  // A provider picked from the directory goes on the interaction it was opened from.
+  const picked = (referral) => {
+    const x = finder.x;
+    const what = x.what.trim() ? x.what : 'Referral: ' + referral.name + (referral.site && referral.site !== referral.name ? ', ' + referral.site : '');
+    save({ ...x, what, referral }, true);
+    focusLater('ix-' + x.id + '-find');
   };
   const t = totals(k.interactions);
   const lookup = (id) => (k.clientId ? actions[id] : k.actions.find((a) => a.id === id));
   const elapsed = minutesBetween(k.startedAt, k.endedAt || new Date().toISOString());
   const have = k.interactions.map((x) => x.what);
+  const presets = PRESETS.filter((p) => have.indexOf(p.what) < 0);
+  const near = effective(k.reach, k.known && k.known.reach, 'zip') || k.anon.zip;
+  const list = k.interactions.map((x) => ({ x, draft: false })).concat(open ? pending.map((x) => ({ x, draft: true })) : []);
   return (
     <div className="view asc-view">
       <StepHeading>Interactions</StepHeading>
       <div className="asc-step-actions"><span className="asc-total" role="status">{totalsText(t)} · {k.status === 'open' ? 'contact so far ' : 'contact '}{elapsed} min</span></div>
+
+      <Section id="h-ix" title="Service interactions" icon="layers" hint={open ? 'One for each resource, referral or hand-off.' : undefined}
+        aside={open && <button type="button" className="btn-outline" id="asc-add-ix" onClick={addDraft}><Icon name="plus" />Add Interaction</button>}>
+        {list.length ? (
+          <ol className="asc-ix-list">
+            {list.map(({ x, draft }, i) => (
+              <InteractionCard key={x.id} k={k} x={x} num={i + 1} edit={edit} save={save} needs={needs} isNew={x.id === justAdded} draft={draft} presets={presets}
+                onRemoveDraft={draft && list.length > 1 ? () => setDrafts(pending.filter((d) => d.id !== x.id)) : null}
+                reminders={k.links.filter((l) => l.ixId === x.id).map((l) => lookup(l.actionId)).filter(Boolean)} onFind={(ix) => setFinder({ x: ix })} />
+            ))}
+          </ol>
+        ) : <p className="asc-empty">No interactions.</p>}
+        <datalist id="asc-presets">{presets.map((p) => <option key={p.label} value={p.label} />)}</datalist>
+        {finder && (
+          <ProviderSearchModal need={finder.x.need} intakeAge={k.intake.age} coverage={k.intake.coverage} near={near}
+            onPick={picked} onClose={() => setFinder(null)} />
+        )}
+      </Section>
 
       {k.clientId ? <FollowUp k={k} edit={edit} /> : (
         <p className="notice"><Icon name="calendar" size={18} /><span>Follow-ups can be scheduled once the person is identified.</span></p>
       )}
       {k.channel === 'person' && <OnSite k={k} edit={edit} />}
 
-      <Section id="h-ix" title="Service interactions" icon="layers">
-        {k.interactions.length ? (
-          <ol className="asc-ix-list">
-            {k.interactions.map((x, i) => (
-              <InteractionCard key={x.id} k={k} x={x} num={i + 1} edit={edit} needs={needs} isNew={x.id === justAdded}
-                reminders={k.links.filter((l) => l.ixId === x.id).map((l) => lookup(l.actionId)).filter(Boolean)} onFind={(ix) => setFinder({ x: ix })} />
-            ))}
-          </ol>
-        ) : <p className="asc-empty">No interactions yet.</p>}
-        <div className="asc-pr-launch">
-          <span>Referring them somewhere? Search the provider directory instead of the web.</span>
-          <button type="button" className="btn-outline" id="asc-find-provider" onClick={() => setFinder({ add: true })}><Icon name="search" />Find a Provider</button>
-        </div>
-        <form className="asc-inline-row" onSubmit={submit}>
-          <Field id="asc-custom-ix" label="Add an interaction" value={custom} onChange={setCustom} placeholder="Choose a resource or type one" list="asc-presets" autoComplete="off" />
-          <datalist id="asc-presets">{PRESETS.filter((p) => have.indexOf(p.what) < 0).map((p) => <option key={p.label} value={p.label} />)}</datalist>
-          <button type="submit" className="btn-outline">Add</button>
-        </form>
-        {finder && (
-          <ProviderSearchModal need={finder.x ? finder.x.need : needs[0] || ''} needs={finder.x ? null : needs} intakeAge={k.intake.age} coverage={k.intake.coverage}
-            onPick={picked} onClose={() => { if (finder.add) focusLater('asc-find-provider'); setFinder(null); }} />
-        )}
-      </Section>
-
       {(next || t.incomplete > 0) && <div className="asc-foot">
-        {t.incomplete ? <p className="asc-gaps"><Icon name="info" size={16} />{t.incomplete === 1 ? '1 interaction is' : t.incomplete + ' interactions are'} missing minutes or place of service.</p> : <span />}
+        {t.incomplete ? <p className="asc-gaps"><Icon name="info" size={16} />{t.incomplete === 1 ? '1 interaction is' : t.incomplete + ' interactions are'} missing what was given, minutes or place of service.</p> : <span />}
         {next && <button type="button" className="btn-primary is-icon" onClick={() => navigate({ page: 'contact', id: k.id, step: next[0] })}>Next: {next[1]}<Icon name="arrowRight" /></button>}
       </div>}
     </div>

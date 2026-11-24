@@ -15,9 +15,10 @@ import { MatchCard } from './Intake.jsx';
 const go = (k, step) => navigate({ page: 'contact', id: k.id, step });
 const BLANK = { first: '', last: '', dob: '', zip: '', ssn: '' };
 
-// One search: name and date of birth, with ZIP and the last 4 of their SSN when they'll share them.
+// One search: name and date of birth, with ZIP and the last 4 of their SSN when they'll share them. It starts with
+// what intake has: the client's name as the caller gave it, and their date of birth and ZIP if given.
 function Search({ k, edit, onNew, onUnverified }) {
-  const [form, setForm] = useState(BLANK);
+  const [form, setForm] = useState(() => ({ ...BLANK, first: k.intake.clientFirst, last: k.intake.clientLast, dob: k.demo.dob || '', zip: k.reach.zip || '' }));
   const [run, setRun] = useState(null);
   const [error, setError] = useState('');
   const { query, results } = useSearch(run);
@@ -79,7 +80,9 @@ function NewClient({ k, start, cancel }) {
   const { linkContact } = useAscMutations();
   const { toast } = useApi();
   const iso = (us) => { const p = String(us || '').split('/'); return p.length === 3 ? p[2] + '-' + p[0] + '-' + p[1] : us; };
-  const [f, setF] = useState({ first: start.first || '', last: start.last || '', dob: start.dob || '', gender: '', ssn: '', phone: '', street: '', city: 'Pittsburgh', zip: start.zip || k.anon.zip || '', county: 'Allegheny', living: '', language: 'English' });
+  // Starts with what intake has, so nothing is asked twice.
+  const r = (key) => k.reach[key] || '', d = (key) => k.demo[key] || '';
+  const [f, setF] = useState({ first: start.first || '', last: start.last || '', dob: start.dob || d('dob'), gender: ['Female', 'Male', 'Nonbinary'].indexOf(d('gender')) >= 0 ? d('gender') : '', ssn: '', phone: r('phone'), email: r('email'), street: r('street'), city: r('city') || 'Pittsburgh', zip: start.zip || r('zip') || k.anon.zip || '', county: 'Allegheny', living: d('living'), language: d('language') || 'English', race: d('race'), ethnicity: d('ethnicity'), marital: d('marital') });
   const [error, setError] = useState('');
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -110,10 +113,11 @@ function NewClient({ k, start, cancel }) {
         <Field id="n-dob" label="Date of birth" value={iso(f.dob)} onChange={set('dob')} type="date" required aria-invalid={bad('dob')} aria-describedby={bad('dob') ? 'n-err' : undefined} />
         <Field id="n-ssn" label="SSN" value={f.ssn} onChange={set('ssn')} inputMode="numeric" placeholder="Only if they're comfortable" autoComplete="off" />
         <Field id="n-phone" label="Phone" value={f.phone} onChange={set('phone')} type="tel" autoComplete="off" />
+        <Field id="n-email" label="Email" value={f.email} onChange={set('email')} type="email" autoComplete="off" />
         <div className="field"><label htmlFor="n-living">Living situation</label>
-          <select className="select" id="n-living" value={f.living} onChange={(e) => set('living')(e.target.value)}><option value="">Not asked yet</option><option>With family</option><option>Independent</option><option>Shelter</option><option>Unhoused</option><option>In jail</option></select></div>
+          <select className="select" id="n-living" value={f.living} onChange={(e) => set('living')(e.target.value)}><option value="">Not asked yet</option>{['With family', 'Independent', 'Shelter', 'Supported housing', 'Unhoused', 'In jail'].concat(f.living && ['With family', 'Independent', 'Shelter', 'Supported housing', 'Unhoused', 'In jail'].indexOf(f.living) < 0 ? [f.living] : []).map((o) => <option key={o}>{o}</option>)}</select></div>
         <div className="field"><label htmlFor="n-lang">Primary language</label>
-          <select className="select" id="n-lang" value={f.language} onChange={(e) => set('language')(e.target.value)}><option>English</option><option>Spanish</option><option>Nepali</option><option>Arabic</option><option>Swahili</option><option>Other</option></select></div>
+          <select className="select" id="n-lang" value={f.language} onChange={(e) => set('language')(e.target.value)}>{['English', 'Spanish', 'Nepali', 'Arabic', 'Swahili', 'Other'].map((o) => <option key={o}>{o}</option>)}</select></div>
         <Field id="n-street" label="Street address" value={f.street} onChange={set('street')} autoComplete="off" wide />
         <Field id="n-city" label="City" value={f.city} onChange={set('city')} autoComplete="off" />
         <Field id="n-zip" label="ZIP" value={f.zip} onChange={set('zip')} inputMode="numeric" maxLength={5} autoComplete="off" />
@@ -164,18 +168,12 @@ function Confirm({ k, edit }) {
   );
 }
 
-function Identified({ k, edit, next }) {
+// Earlier anonymous contacts that may be this client's: link them to the record, or say they're someone else.
+export function PossibleLinks({ k, edit }) {
   const c = k.client;
-  const head = useMountFocus();
+  if (!c) return null;
   return (
     <>
-      <section className="asc-card is-done" aria-labelledby="h-identified">
-        <div className="asc-card-head">
-          <h3 className="section-label" id="h-identified" tabIndex={-1} ref={head}><Icon name="check" size={18} />{c.first} {c.last} is on this contact</h3>
-          <Link className="link-btn is-inline" to={{ page: 'client', id: c.id, sub: 'tab', tab: 'asc' }}><Icon name="external" size={14} />Open Client Profile</Link>
-        </div>
-        <p>{k.identity === 'new' ? 'Registered in MCI and enrolled in ASC.' : 'Matched in MCI and enrolled in ASC.'}</p>
-      </section>
       {k.possibleLinks.length > 0 && (
         <section className="asc-card is-warn" aria-labelledby="h-links">
           <h3 className="section-label" id="h-links"><Icon name="link" size={18} />{k.possibleLinks.length === 1 ? 'An earlier anonymous contact may be theirs' : k.possibleLinks.length + ' earlier anonymous contacts may be theirs'}</h3>
@@ -189,6 +187,23 @@ function Identified({ k, edit, next }) {
         </section>
       )}
       {k.linkedPrior === 'linked' && <p className="notice is-good"><Icon name="check" size={18} /><span>Earlier contacts {k.priorRefs.length ? k.priorRefs.join(' and ') : ''} are on {c.first}'s record.</span></p>}
+    </>
+  );
+}
+
+function Identified({ k, edit, next }) {
+  const c = k.client;
+  const head = useMountFocus();
+  return (
+    <>
+      <section className="asc-card is-done" aria-labelledby="h-identified">
+        <div className="asc-card-head">
+          <h3 className="section-label" id="h-identified" tabIndex={-1} ref={head}><Icon name="check" size={18} />{c.first} {c.last} is on this contact</h3>
+          <Link className="link-btn is-inline" to={{ page: 'client', id: c.id, sub: 'tab', tab: 'asc' }}><Icon name="external" size={14} />Open Client Profile</Link>
+        </div>
+        <p>{k.identity === 'new' ? 'Registered in MCI and enrolled in ASC.' : 'Matched in MCI and enrolled in ASC.'}</p>
+      </section>
+      <PossibleLinks k={k} edit={edit} />
       {next && <div className="asc-foot"><span /><button type="button" className="btn-primary is-icon" onClick={() => go(k, next[0])}>Next: {next[1]}<Icon name="arrowRight" /></button></div>}
     </>
   );
@@ -204,12 +219,10 @@ function Anonymous({ k, edit, next }) {
           <h3 className="section-label" id="h-anon" tabIndex={-1} ref={head}><Icon name="user" size={18} />Anonymous record</h3>
           <button type="button" className="btn-text" onClick={() => edit({ path: null }, { now: true })}>Look Them Up</button>
         </div>
-        <p className="asc-hint">All optional. No last name, birth date, phone or address.</p>
+        <p className="asc-hint">Not in MCI. How to reach them and demographics, if they gave any, are on <Link className="link-btn is-inline" to={{ page: 'contact', id: k.id, step: 'intake' }}>Intake</Link>.</p>
         <div className="form-grid">
-          <Field id="a-name" label="First name or nickname" value={k.anon.name} onChange={set('name')} autoComplete="off" />
-          <Field id="a-zip" label="ZIP" value={k.anon.zip} onChange={set('zip')} inputMode="numeric" maxLength={5} autoComplete="off" />
+          <Field id="a-name" label="What to call them" value={k.anon.name} onChange={set('name')} autoComplete="off" placeholder="First name or nickname" />
           <div className="field"><label htmlFor="a-county">County</label><select className="select" id="a-county" value={k.anon.county} onChange={(e) => edit({ anon: { county: e.target.value } }, { now: true })}><option>Allegheny</option><option>Another county</option><option>Not sure</option></select></div>
-          <div className="field"><label htmlFor="a-lang">Preferred language</label><select className="select" id="a-lang" value={k.anon.language} onChange={(e) => edit({ anon: { language: e.target.value } }, { now: true })}><option>English</option><option>Spanish</option><option>Nepali</option><option>Arabic</option><option>Swahili</option><option>Other</option></select></div>
         </div>
         <div className="asc-ref"><span>Their reference number</span><strong className="mono">{k.ref}</strong><span>“If you {k.channel === 'person' ? 'come back' : 'call back'}, give us this number.”</span></div>
       </section>
@@ -241,7 +254,7 @@ export function IdentifyStep({ k, edit, next }) {
                       <h3 className="section-label" id="h-stay"><Icon name="user" size={18} />Stay anonymous</h3>
                       <p>Give information and resources. Nothing identifies them.</p>
                       <div className="asc-ref"><span>Their reference number</span><strong className="mono">{k.ref}</strong></div>
-                      <button type="button" className="btn-outline" onClick={() => edit({ path: 'anon' }, { now: true })}>Stay Anonymous</button>
+                      <button type="button" className="btn-outline" onClick={() => edit(k.anon.name || !k.intake.clientFirst ? { path: 'anon' } : { path: 'anon', anon: { name: k.intake.clientFirst } }, { now: true })}>Stay Anonymous</button>
                     </section>
                     <Search k={k} edit={edit} onNew={setNewFrom} onUnverified={(name) => edit({ identity: 'unverified', unverifiedName: name }, { now: true })} />
                   </div>

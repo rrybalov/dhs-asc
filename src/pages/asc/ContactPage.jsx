@@ -8,7 +8,7 @@ import { useContact, useContactEditor, useContactHistory } from '../../state/asc
 import { useModalControls } from '../../state/modal.js';
 import { Link, navigate } from '../../router.jsx';
 import { Loading, LoadError } from '../../ui/controls.jsx';
-import { STEPS, stepState, clockTime, minutesBetween, usDate, channelPatch } from '../../data/asc.js';
+import { stepsFor, stepState, clockTime, minutesBetween, usDate, channelPatch } from '../../data/asc.js';
 import { Panel } from '../client/Panel.jsx';
 import { channelIcon, channelLabel, initials } from './parts.jsx';
 import { IntakeStep } from './Intake.jsx';
@@ -102,6 +102,9 @@ export function ContactPage({ route }) {
   const { user } = useSession();
   const [panelOpen, setPanelOpen] = usePref('panel.asc', true);
   const k = editor.view;
+  // An old link to Identify on a contact that skips it goes to Interactions.
+  const skip = !!k && route.step === 'identify' && !stepsFor(k).some((s) => s[0] === 'identify');
+  useEffect(() => { if (skip) navigate(stepHref(k.id, 'interactions'), { replace: true, focus: false, keepScroll: true }); }, [skip]); // eslint-disable-line react-hooks/exhaustive-deps
 
   let body;
   if (!k) {
@@ -111,8 +114,11 @@ export function ContactPage({ route }) {
       : query.status === 'error' ? <LoadError error={query.error} retry={query.retry} what="this contact" /> : <Loading label="Loading contact" block />;
   } else {
     const done = stepState(k);
-    const View = VIEWS[route.step] || IntakeStep;
-    const idx = STEPS.findIndex((s) => s[0] === route.step);
+    const STEPS = stepsFor(k);
+    // Identify isn't a step when the person was known before it (started from their record, or found in intake).
+    const step = STEPS.some((s) => s[0] === route.step) ? route.step : route.step === 'identify' ? 'interactions' : route.step;
+    const View = VIEWS[step] || IntakeStep;
+    const idx = STEPS.findIndex((s) => s[0] === step);
     body = (
       <>
         <nav className="crumbs" aria-label="Breadcrumb">
@@ -125,7 +131,7 @@ export function ContactPage({ route }) {
           <div className="tabs-wrap">
             <nav className="tabs asc-tabs" aria-label="Contact steps">
               {STEPS.map(([id, label], i) => (
-                <Link key={id} className="tab asc-step" to={stepHref(k.id, id)} focus={false} aria-current={route.step === id ? 'step' : undefined}>
+                <Link key={id} className="tab asc-step" to={stepHref(k.id, id)} focus={false} aria-current={step === id ? 'step' : undefined}>
                   <span className={'asc-step-num' + (done[id] ? ' is-done' : '')} aria-hidden="true">{done[id] ? <Icon name="checkSmall" size={13} /> : i + 1}</span>
                   {label}{done[id] && <span className="sr-only"> (done)</span>}
                 </Link>
@@ -133,7 +139,7 @@ export function ContactPage({ route }) {
             </nav>
           </div>
           {k.correction && <CorrectionBar k={k} flush={editor.flush} />}
-          {k.status === 'closed' && !k.correction && route.step !== 'wrap-up' ? (
+          {k.status === 'closed' && !k.correction && step !== 'wrap-up' ? (
             <>
               <div className="notice asc-locked-note"><Icon name="lock" size={18} /><span><strong>This contact is closed</strong> ({usDate(k.endedAt)}). Case notes and action items can still be added. <EditClosed k={k} /></span></div>
               <fieldset className="asc-locked" disabled><legend className="sr-only">Closed contact, read only</legend>

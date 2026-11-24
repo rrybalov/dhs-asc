@@ -6,12 +6,16 @@ import { useClient, useSearch } from '../../state/data.js';
 import { useAscMutations } from '../../state/asc.js';
 import { navigate } from '../../router.jsx';
 import {
-  SAFETY, CALLERS, AGES, COVERAGE, FOUND, PRIVACY, URGENCY, NEED_OPTIONS, SCREENING, SITES,
-  needForScreen, isConcern, usDate
+  SAFETY, CALLERS, CALLER_DETAIL, AGES, COVERAGE, FOUND, FOUND_DETAIL, PRIVACY, URGENCY, NEED_OPTIONS, SCREENING, SITES,
+  REACH_FIELDS, DEMO_FIELDS, DEMO_OPTIONS, needForScreen, isConcern, usDate, ageGroupFor, effective, reachChanged, blankReach, stepsFor
 } from '../../data/asc.js';
 import { Options, Section, StepHeading, initials, focusLater, removeWithUndo, useMountFocus } from './parts.jsx';
-import { useApi } from '../../state/store.jsx';
+import { PossibleLinks } from './Identify.jsx';
+import { useApi, usePref } from '../../state/store.jsx';
 import { dobText } from '../../lib.js';
+
+// Dates of birth on file are MM/DD/YYYY; date fields use YYYY-MM-DD.
+export const isoDob = (v) => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(v || ''); return m ? m[3] + '-' + m[1] + '-' + m[2] : v || ''; };
 
 let needSeq = 0;
 export const newNeed = (name, urg = 'Routine') => ({ id: 'n' + Date.now().toString(36) + (needSeq++), name, urg, outcome: '', outcomeNote: '' });
@@ -52,41 +56,29 @@ function Safety({ k, edit, openModal }) {
   );
 }
 
-// One way to find a caller: the reference number from an earlier contact, or their name and date of birth.
+// A returning caller's reference number, from an earlier contact. Attaching it ties the contacts together.
 function LookUp({ k, edit, openModal, close }) {
   const { lookupContact } = useAscMutations();
-  const [form, setForm] = useState({ ref: '', first: '', last: '', dob: '' });
+  const [ref, setRef] = useState('');
   const [byRef, setByRef] = useState({ busy: false, found: null });
-  const [run, setRun] = useState(null);
   const [error, setError] = useState('');
-  const { query, results } = useSearch(run);
-  const set = (key) => (v) => { setForm({ ...form, [key]: v }); if (error) setError(''); };
   const submit = (e) => {
     e.preventDefault();
-    setRun(null); setByRef({ busy: false, found: null });
-    if (form.ref.trim()) {
-      setError(''); setByRef({ busy: true, found: null });
-      lookupContact(form.ref.trim()).then((found) => setByRef({ busy: false, found }), () => { setByRef({ busy: false, found: null }); setError('No contact has that reference number. Check it with them, or search by name.'); });
-      return;
-    }
-    if (!form.first.trim() && !form.last.trim()) { setError('Enter a reference number, or a first or last name.'); return; }
-    setError(''); setRun({ first: form.first, last: form.last, dob: form.dob });
+    if (!ref.trim()) { setError('Enter the reference number they were given.'); return; }
+    setError(''); setByRef({ busy: true, found: null });
+    lookupContact(ref.trim()).then((found) => setByRef({ busy: false, found }), () => { setByRef({ busy: false, found: null }); setError('No contact has that reference number. Check it with them.'); });
   };
   const attach = () => edit({ priorRef: byRef.found.ref }, { now: true }).then(() => { close(true); openModal('ascHistory', { contactId: k.id }); });
-  const pick = (c) => { edit({ candidateId: c.id, path: 'client' }, { now: true }); close(true); };
   return (
     <form className="asc-inline" onSubmit={submit} noValidate aria-labelledby="h-lookup-caller">
-      <h3 id="h-lookup-caller">Look up caller</h3>
+      <h3 id="h-lookup-caller">Returning caller</h3>
       <div className="form-grid asc-lookup-grid">
-        <Field id="asc-ref" label="Reference number" autoFocus value={form.ref} onChange={set('ref')} placeholder="EV-26-000142" autoComplete="off" aria-invalid={!!error && !!form.ref} aria-describedby={error ? 'asc-look-err' : undefined} />
-        <Field id="q-first" label="First name" value={form.first} onChange={set('first')} autoComplete="off" />
-        <Field id="q-last" label="Last name" value={form.last} onChange={set('last')} autoComplete="off" />
-        <Field id="q-dob" label="Date of birth" value={form.dob} onChange={set('dob')} type="date" />
+        <Field id="asc-ref" label="Reference number" autoFocus value={ref} onChange={(v) => { setRef(v); if (error) setError(''); }} placeholder="EV-26-000142" autoComplete="off" aria-invalid={!!error} aria-describedby={error ? 'asc-look-err' : undefined} />
       </div>
       {error && <p className="field-error" id="asc-look-err" role="alert">{error}</p>}
       <div className="asc-inline-row is-end">
         <button type="button" className="btn-text" onClick={() => close()}>Cancel</button>
-        <button type="submit" className="btn-primary" disabled={byRef.busy}>Search</button>
+        <button type="submit" className="btn-primary" disabled={byRef.busy}>Look Up</button>
       </div>
       {byRef.found && (
         <div className="asc-found" role="status">
@@ -94,6 +86,44 @@ function LookUp({ k, edit, openModal, close }) {
           <button type="button" className="btn-outline" onClick={attach}><Icon name="history" />Attach and View</button>
         </div>
       )}
+    </form>
+  );
+}
+
+// Who the client is, as the caller gives it. Searching MCI from here and picking them puts the contact on their
+// record straight away, so there's no Identify step.
+function ClientFinder({ k, edit }) {
+  const { linkContact } = useAscMutations();
+  const { toast } = useApi();
+  const i = k.intake;
+  const [run, setRun] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(null);
+  const { query, results } = useSearch(run);
+  const dob = k.demo.dob || '';
+  const setName = (key) => (v) => { edit({ intake: { [key]: v } }); if (error) setError(''); };
+  const setDob = (v) => edit(i.age || !ageGroupFor(v) ? { demo: { dob: v } } : { demo: { dob: v }, intake: { age: ageGroupFor(v) } });
+  const search = () => {
+    if (!i.clientFirst.trim() && !i.clientLast.trim()) { setError('Enter a first or last name to search MCI.'); focusLater('asc-client-first'); return; }
+    setError(''); setRun({ first: i.clientFirst, last: i.clientLast, dob });
+  };
+  const pick = (c) => {
+    setBusy(c.id);
+    linkContact(k, { clientId: c.id, from: 'intake' }).then((r) => { toast(r.client.first + ' ' + r.client.last + ' is on this contact and enrolled in ASC'); focusLater('h-match'); }, () => setBusy(null));
+  };
+  const caller = i.caller && i.caller !== 'The client';
+  return (
+    <div className="asc-client-find">
+      <div className="form-grid is-3">
+        <Field id="asc-client-first" label="First name" value={i.clientFirst} onChange={setName('clientFirst')} autoComplete="off" />
+        <Field id="asc-client-last" label="Last name" value={i.clientLast} onChange={setName('clientLast')} autoComplete="off" />
+        <Field id="asc-client-dob" label="Date of birth" type="date" value={dob} onChange={setDob} />
+      </div>
+      <div className="asc-inline-row">
+        <button type="button" className="btn-outline" id="asc-client-search" onClick={search}><Icon name="search" />Search MCI</button>
+        <span className="asc-hint">{caller ? 'Who the caller says the client is. ' : ''}Optional. They can stay anonymous.</span>
+      </div>
+      {error && <p className="field-error" role="alert">{error}</p>}
       {run && (
         <div className="asc-results" aria-live="polite">
           {!query.ready ? <p className="asc-hint">Searching…</p>
@@ -102,18 +132,70 @@ function LookUp({ k, edit, openModal, close }) {
                 {results.slice(0, 6).map((c) => (
                   <li key={c.id}>
                     <span><strong>{c.first} {c.last}</strong><small>{dobText(c)} · MCI {c.mci} · {c.address.city} {c.address.zip}</small></span>
-                    <button type="button" className="btn-outline" onClick={() => pick(c)}>Select {c.first} {c.last}</button>
+                    <button type="button" className="btn-outline" disabled={!!busy} onClick={() => pick(c)}>{busy === c.id ? 'Adding…' : 'Select ' + c.first + ' ' + c.last}</button>
                   </li>
                 ))}
               </ul>
-            ) : <p className="asc-hint">No match in MCI. Keep going; you can search again on Identify.</p>}
+            ) : <p className="asc-hint">No match in MCI. Keep going: on Identify they can stay anonymous, or you can register them.</p>}
         </div>
       )}
-    </form>
+    </div>
   );
 }
 
-// The person this contact is about, once picked: one line. Details and "Not the right person" are on Identify.
+// How to reach the person. For a known client it starts as what's on file; changing it saves the new info on their
+// record, reported to ASC. Demographics are behind a toggle: reaching them matters more.
+function Reach({ k, edit }) {
+  const kn = k.known;
+  const [demoOpen, setDemoOpen] = usePref('asc.demo', false);
+  const who = k.client || k.candidate;
+  const val = (key) => effective(k.reach, kn && kn.reach, key);
+  const dval = (key) => (key === 'dob' ? k.demo.dob || isoDob(kn && kn.demo.dob) : effective(k.demo, kn && kn.demo, key));
+  const changed = !!kn && reachChanged(k);
+  const onFile = kn && (kn.source || kn.asOf) ? 'On file' + (kn.source ? ' from ' + kn.source : '') + (kn.asOf ? ', as of ' + kn.asOf : '') + '.' : kn ? 'What’s on file.' : '';
+  const hint = kn ? onFile + ' Update anything that’s changed.' : 'Optional. Kept with this contact' + (k.clientId ? '.' : ', and moves to their record if they’re identified.');
+  const wide = { street: true };
+  return (
+    <Section id="h-reach" title="How to reach them" icon="phone" hint={hint}
+      aside={changed && <button type="button" className="btn-text" onClick={() => edit({ reach: blankReach() }, { now: true })}>Use What’s on File</button>}>
+      <div className="form-grid asc-reach-grid">
+        {REACH_FIELDS.map(([key, label]) => (
+          <Field key={key} id={'asc-reach-' + key} label={label} value={val(key)} wide={wide[key]} onChange={(v) => edit({ reach: { [key]: v } })}
+            autoComplete="off" type={key === 'email' ? 'email' : key === 'phone' ? 'tel' : 'text'} inputMode={key === 'zip' ? 'numeric' : undefined} maxLength={key === 'zip' ? 5 : key === 'state' ? 2 : undefined} />
+        ))}
+      </div>
+      {changed && who && <p className="notice is-good" role="status"><Icon name="check" size={18} /><span>{k.clientId ? 'Saved to ' + who.first + '’s record as an address reported to ASC. What was on file stays in their address history.' : 'Saved to ' + who.first + '’s record, reported to ASC, once they’re enrolled.'}</span></p>}
+      <button type="button" className="btn-text is-icon asc-demo-toggle" aria-expanded={demoOpen} aria-controls={demoOpen ? 'asc-demo' : undefined} onClick={() => setDemoOpen(!demoOpen)}>
+        <Icon name="chevronDown" size={16} className={'chev' + (demoOpen ? ' is-open' : '')} />{demoOpen ? 'Hide Demographics' : 'Show Demographics'}
+      </button>
+      {demoOpen && (
+        <div id="asc-demo" className="asc-demo">
+          <p className="asc-hint">{kn ? 'From MCI. Changes here are kept with this contact; they don’t change MCI.' : 'Optional. Ask only if they’re comfortable.'}</p>
+          <div className="form-grid">
+            {DEMO_FIELDS.map(([key, label]) => (key === 'dob'
+              ? <Field key={key} id="asc-demo-dob" label={label} type="date" value={dval('dob')} onChange={(v) => edit(k.intake.age || !ageGroupFor(v) ? { demo: { dob: v } } : { demo: { dob: v }, intake: { age: ageGroupFor(v) } })} />
+              : (
+                <div className="field" key={key}><label htmlFor={'asc-demo-' + key}>{label}</label>
+                  <select className="select" id={'asc-demo-' + key} value={dval(key)} onChange={(e) => edit({ demo: { [key]: e.target.value } }, { now: true })}>
+                    <option value="">Not asked</option>
+                    {DEMO_OPTIONS[key].concat(dval(key) && DEMO_OPTIONS[key].indexOf(dval(key)) < 0 ? [dval(key)] : []).map((o) => <option key={o}>{o}</option>)}
+                  </select></div>
+              )))}
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+// The detail box under whichever answer is chosen.
+function Detail({ id, spec, value, onChange }) {
+  if (!spec) return null;
+  return <div className="form-grid is-2 asc-detail"><Field id={id} label={spec.label} value={value} onChange={onChange} placeholder={spec.placeholder} autoComplete="off" wide /></div>;
+}
+
+// The person this contact is about, once picked: one line. For a candidate, details and "Not the right person"
+// are on Identify.
 export function MatchCard({ k }) {
   const s = k.candidate || k.client;
   // Focus moves here only when a match is chosen, not when the page opens with one already chosen.
@@ -124,7 +206,7 @@ export function MatchCard({ k }) {
     <section className="asc-match is-line" aria-labelledby="h-match">
       <span className="asc-avatar" aria-hidden="true">{initials(s)}</span>
       <h3 id="h-match" tabIndex={-1} ref={head}>{s.first} {s.last}</h3>
-      <span>{dobText(s)} · MCI {s.mci}</span>
+      <span>{dobText(s)} · MCI {s.mci}{k.clientId ? ' · Enrolled in ASC' : ''}</span>
     </section>
   );
 }
@@ -195,12 +277,13 @@ export function IntakeStep({ k, edit, openModal, next }) {
   const i = k.intake;
   const set = (key, now) => (v) => edit({ intake: { [key]: v } }, now ? { now: true } : undefined);
   const closed = k.status === 'closed';
+  const known = !!(k.clientId || k.candidateId);
   return (
     <div className="view asc-view">
       <StepHeading>Intake</StepHeading>
-      {!k.clientId && !k.candidateId && !closed && (
+      {!known && !closed && (
         <div className="asc-step-actions">
-          <button type="button" className="btn-outline" id="asc-btn-look" aria-expanded={look} onClick={() => setLook(!look)}><Icon name="search" />Look Up Caller</button>
+          <button type="button" className="btn-outline" id="asc-btn-look" aria-expanded={look} onClick={() => setLook(!look)}><Icon name="history" />Returning Caller</button>
         </div>
       )}
       {look && <LookUp k={k} edit={edit} openModal={openModal} close={(quiet) => setLook(false, quiet)} />}
@@ -211,7 +294,6 @@ export function IntakeStep({ k, edit, openModal, next }) {
           <button type="button" className="btn-outline" onClick={() => openModal('ascHistory', { contactId: k.id })}>View History</button>
         </div>
       )}
-      {(k.candidateId || k.clientId) && <MatchCard k={k} />}
 
       <Where k={k} edit={edit} />
       <Safety k={k} edit={edit} openModal={openModal} />
@@ -221,16 +303,26 @@ export function IntakeStep({ k, edit, openModal, next }) {
           <div className="asc-confirm">
             <p id="h-cconf"><strong>On file:</strong> {c.guardian.name}, {c.guardian.relationship.toLowerCase()} · {c.guardian.phone}. Is this who you're talking to?</p>
             <Options labelId="h-cconf" value={i.callerConfirmed} options={['Yes, ' + c.guardian.name, 'Someone else']}
-              onChange={(v) => edit({ intake: v && v !== 'Someone else' ? { callerConfirmed: v, caller: 'Parent or guardian', callerName: c.guardian.name } : { callerConfirmed: v } }, { now: true })} />
+              onChange={(v) => edit({ intake: v && v !== 'Someone else' ? { callerConfirmed: v, caller: 'Parent or guardian', callerDetail: c.guardian.name + ', ' + c.guardian.relationship.toLowerCase() } : { callerConfirmed: v } }, { now: true })} />
           </div>
         )}
         <p className="field-label" id="h-caller">Caller</p>
         <Options labelId="h-caller" value={i.caller} options={CALLERS} onChange={set('caller', true)} />
-        {i.caller === 'Other' && <div className="form-grid is-2"><Field id="asc-caller-other" label="Who is calling?" value={i.callerOther} onChange={set('callerOther')} placeholder="For example: neighbor, pastor, landlord" /></div>}
-        <p className="field-label" id="h-age">The person who needs help</p>
+        {i.caller && <Detail id="asc-caller-detail" spec={CALLER_DETAIL[i.caller]} value={i.callerDetail} onChange={set('callerDetail')} />}
+        <p className="field-label" id="h-age">Age of the person who needs help</p>
         <Options labelId="h-age" value={i.age} options={AGES} onChange={set('age', true)} />
-        <div className="form-grid is-2"><Field id="asc-caller-name" label="Caller's name (optional)" value={i.callerName} onChange={set('callerName')} autoComplete="off" /></div>
       </Section>
+
+      <Section id="h-client" title="Who the client is" icon="user">
+        {known ? (
+          <>
+            <MatchCard k={k} />
+            {k.clientId && !stepsFor(k).some((s) => s[0] === 'identify') && <PossibleLinks k={k} edit={edit} />}
+          </>
+        ) : <ClientFinder k={k} edit={edit} />}
+      </Section>
+
+      <Reach k={k} edit={edit} />
 
       <Section id="h-story" title="What's going on" icon="notes">
         <label className="sr-only" htmlFor="asc-story">What's going on, in their words</label>
@@ -254,7 +346,7 @@ export function IntakeStep({ k, edit, openModal, next }) {
 
       <Section id="h-found" title="How they found us" icon="search">
         <Options label="How they found us" value={i.found} options={FOUND} onChange={set('found', true)} />
-        {i.found === 'Other' && <div className="form-grid is-2"><Field id="asc-found-other" label="How did they find us?" value={i.foundOther} onChange={set('foundOther')} placeholder="For example: flyer at the library" /></div>}
+        {i.found && <Detail id="asc-found-detail" spec={FOUND_DETAIL[i.found]} value={i.foundDetail} onChange={set('foundDetail')} />}
       </Section>
 
       {next && <div className="asc-foot"><span /><button type="button" className="btn-primary is-icon" onClick={() => navigate({ page: 'contact', id: k.id, step: next[0] })}>Next: {next[1]}<Icon name="arrowRight" /></button></div>}

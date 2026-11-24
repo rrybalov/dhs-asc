@@ -1,13 +1,13 @@
 // Step 4, Wrap Up: an outcome for each need, anything that would stop the contact being reported, then close.
 // Closing saves an automatic summary as a case note. A supervisor can later correct a closed contact.
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Icon } from '../../ui/icons.jsx';
 import { Table } from '../../ui/controls.jsx';
-import { useApi } from '../../state/store.jsx';
+import { useApi, useData } from '../../state/store.jsx';
 import { useSession } from '../../state/data.js';
 import { useAscMutations } from '../../state/asc.js';
 import { Link, navigate } from '../../router.jsx';
-import { OUTCOMES, OPEN, reportingIssues, overtime, unitsFor, serviceCode, minutesBetween, clockTime, usDate, plural, followUpPlan, weekday, shown } from '../../data/asc.js';
+import { OUTCOMES, OPEN, suggestOutcome, reportingIssues, overtime, unitsFor, serviceCode, minutesBetween, clockTime, usDate, plural, followUpPlan, weekday, shown } from '../../data/asc.js';
 import { Badge, Section, StepHeading, useMountFocus } from './parts.jsx';
 import { EditClosed } from './Correction.jsx';
 
@@ -91,10 +91,23 @@ export function WrapUpStep({ k, edit, flush }) {
   const { toast } = useApi();
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { actions } = useData();
+  const live = k.status === 'open' && !k.correction;
+  // Each need's outcome starts as what its interactions point to, and follows them until the coordinator picks one.
+  const isOpenAction = (id) => { const a = k.clientId ? actions[id] : k.actions.find((x) => x.id === id); return !!a && !a.done; };
+  const suggested = {};
+  k.needs.forEach((n) => { suggested[n.id] = suggestOutcome(k, n, isOpenAction); });
+  const auto = live ? k.needs.map((n) => {
+    if (n.outcomeAuto === false || (n.outcome && !n.outcomeAuto)) return n; // the coordinator's choice stands
+    const s = suggested[n.id];
+    return s ? { ...n, outcome: s.outcome, outcomeAuto: true } : n.outcomeAuto ? { ...n, outcome: '', outcomeAuto: null } : n;
+  }) : k.needs;
+  const changed = auto.some((n, i) => n !== k.needs[i] && (n.outcome !== k.needs[i].outcome || n.outcomeAuto !== k.needs[i].outcomeAuto));
+  useEffect(() => { if (changed) edit({ needs: auto }, { now: true }); }, [changed, auto.map((n) => n.outcome).join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
   if (k.status === 'closed' && !k.correction) return <Closed k={k} />;
 
   const unset = k.needs.filter((n) => !n.outcome);
-  const setOutcome = (n, v) => edit({ needs: k.needs.map((x) => (x.id === n.id ? { ...x, outcome: v } : x)) }, { now: true });
+  const setOutcome = (n, v) => edit({ needs: k.needs.map((x) => (x.id === n.id ? { ...x, outcome: v, outcomeAuto: false } : x)) }, { now: true });
   const close = () => {
     setTried(true);
     if (!k.needs.length || unset.length) { const el = document.getElementById(unset.length ? 'out-' + unset[0].id : 'h-wneeds'); if (el) el.focus(); return; }
@@ -108,7 +121,7 @@ export function WrapUpStep({ k, edit, flush }) {
   return (
     <div className="view asc-view">
       <StepHeading>Wrap Up</StepHeading>
-      <Section id="h-wneeds" title="Finish documenting today's conversation" icon="layers" hint="Pick an outcome for each need.">
+      <Section id="h-wneeds" title="Finish documenting today's conversation" icon="layers" hint="Each outcome is filled in from the interactions. Check it, and change it if that's not how it ended.">
         {k.needs.length ? (
           <ul className="asc-outcomes">
             {k.needs.map((n) => {
@@ -118,10 +131,12 @@ export function WrapUpStep({ k, edit, flush }) {
                   <div className="asc-outcome-name"><strong>{n.name}</strong><Badge urg={n.urg} /></div>
                   <div className="field">
                     <label htmlFor={'out-' + n.id}>Outcome</label>
-                    <select className="select" id={'out-' + n.id} value={n.outcome} aria-invalid={bad} aria-describedby={bad ? 'out-err-' + n.id : undefined} onChange={(e) => setOutcome(n, e.target.value)}>
+                    <select className="select" id={'out-' + n.id} value={n.outcome} aria-invalid={bad} aria-describedby={bad ? 'out-err-' + n.id : n.outcomeAuto && suggested[n.id] ? 'out-why-' + n.id : undefined} onChange={(e) => setOutcome(n, e.target.value)}>
                       <option value="">Choose an outcome</option>{OUTCOMES.map((o) => <option key={o}>{o}</option>)}
                     </select>
                     {bad && <span className="field-error" id={'out-err-' + n.id}>Choose an outcome.</span>}
+                    {n.outcomeAuto && suggested[n.id] && <span className="asc-hint is-icon asc-suggested" id={'out-why-' + n.id}><Icon name="link" size={14} />Filled in from the interactions: {suggested[n.id].why}</span>}
+                    {!n.outcome && !suggested[n.id] && !bad && <span className="asc-hint">No interactions for this need, so choose one.</span>}
                     {n.outcome === OPEN && <span className="asc-hint">{plan ? '7-day follow-up on ' + weekday(plan[0].due) + ' ' + usDate(plan[0].due) + '.' : k.clientId ? 'No follow-up scheduled yet.' : 'Stays open for their next contact.'}</span>}
                   </div>
                 </li>

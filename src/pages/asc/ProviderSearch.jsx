@@ -5,7 +5,7 @@ import { Icon } from '../../ui/icons.jsx';
 import { Modal, Loaded } from '../../ui/controls.jsx';
 import { CopyButton } from '../../ui/records.jsx';
 import { useProviderDirectory } from '../../state/asc.js';
-import { searchProviders, filtersFor, referralFrom, NOT_COVERED, AGE_FILTERS } from '../../data/provider-search.js';
+import { searchProviders, filtersFor, referralFrom, placeFor, milesText, NOT_COVERED, AGE_FILTERS } from '../../data/provider-search.js';
 
 const PAGE = 15;
 const CATEGORY_LABELS = { crisis: 'Crisis and emergency', 'mental-health': 'Mental health', 'substance-use': 'Drug and alcohol', 'recovery-support': 'Recovery support',
@@ -32,10 +32,10 @@ function Result({ r, labels, pops, onPick, idx }) {
       {notes.length > 0 && <ul className="asc-pr-limits" aria-label={'Limits for ' + p.name}>{notes.map((t) => <li key={t}><Icon name="alert" size={13} />{t}</li>)}</ul>}
       {p.flags.length > 0 && <p className="asc-pr-flag"><Icon name="info" size={13} />{p.flags[0]}</p>}
       <ul className="asc-pr-sites" aria-labelledby={h}>
-        {r.sites.map(({ facility: f, services }) => (
+        {r.sites.map(({ facility: f, services, miles }) => (
           <li key={f.id} className="asc-pr-site">
             <div className="asc-pr-site-main">
-              <strong>{f.name}</strong>
+              <strong>{f.name}{miles != null && <span className="asc-pr-miles">{milesText(miles)}</span>}</strong>
               {f.address ? <span>{addr(f)}{!f.inAlleghenyCounty && <em className="asc-pr-out"> · {f.county} County</em>}</span> : <span className="asc-hint">Address not confirmed</span>}
               {(f.phone || mainPhone) && <span className="asc-pr-phone"><Icon name="phone" size={13} />{f.phone || mainPhone}<CopyButton value={f.phone || mainPhone} label={'phone number for ' + f.name} size={13} /></span>}
               <span className="asc-pr-svcs">{services.map((s) => <span key={s.service + ages(s)} className="asc-pr-svc">{labels[s.service]}{ages(s) ? ' · ' + ages(s) : ''}</span>)}</span>
@@ -61,14 +61,15 @@ function Result({ r, labels, pops, onPick, idx }) {
 }
 
 // need/intakeAge seed the filters; needs (optional) lets the coordinator switch which need they're searching for.
-export function ProviderSearchModal({ need, intakeAge, coverage, needs, onPick, onClose }) {
+// near (a ZIP from intake) starts the list sorted by distance from where the person is.
+export function ProviderSearchModal({ need, intakeAge, coverage, needs, near, onPick, onClose }) {
   const { query, directory: dir } = useProviderDirectory();
   const [forNeed, setForNeed] = useState(need || '');
-  const [f, setF] = useState(() => filtersFor(need, intakeAge));
+  const [f, setF] = useState(() => ({ ...filtersFor(need, intakeAge), area: near || '' }));
   const [shown, setShown] = useState(PAGE);
   const [other, setOther] = useState('');
   const set = (k) => (v) => { setF({ ...f, [k]: v }); setShown(PAGE); };
-  const pickNeed = (n) => { setForNeed(n); setF(filtersFor(n, intakeAge)); setShown(PAGE); };
+  const pickNeed = (n) => { setForNeed(n); setF({ ...filtersFor(n, intakeAge), area: f.area }); setShown(PAGE); };
   const meta = useMemo(() => {
     if (!dir) return null;
     const labels = {}, cats = {}, pops = {};
@@ -78,6 +79,8 @@ export function ProviderSearchModal({ need, intakeAge, coverage, needs, onPick, 
   }, [dir]);
   const results = useMemo(() => (dir ? searchProviders(dir, f) : []), [dir, f]);
   const sites = results.reduce((n, r) => n + r.sites.length, 0);
+  const place = dir ? placeFor(dir.zips, f.area) : null;
+  const sortNote = place ? ', nearest to ' + place.label + ' first' : f.area.trim() ? ' with “' + f.area.trim() + '” in the address. Enter a ZIP to sort by distance instead' : '';
   const pick = (ref) => { onPick(ref, forNeed); onClose(); };
   const crisis = dir ? dir.hotlines.filter((h) => ['resolve-line', '988', 'pathway-line'].indexOf(h.id) >= 0) : [];
   return (
@@ -109,15 +112,16 @@ export function ProviderSearchModal({ need, intakeAge, coverage, needs, onPick, 
               <select className="select" id="pr-pop" value={f.population} onChange={(e) => set('population')(e.target.value)}>
                 <option value="">Anyone</option>{dir.vocabularies.populations.filter((x) => x.id !== 'all-ages').map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
               </select></div>
-            <div className="field"><label htmlFor="pr-area">Town, neighborhood or ZIP</label>
-              <input className="input" id="pr-area" value={f.area} onChange={(e) => set('area')(e.target.value)} placeholder="For example: McKeesport or 15132" /></div>
+            <div className="field"><label htmlFor="pr-area">Near (ZIP, town or neighborhood)</label>
+              <input className="input" id="pr-area" value={f.area} onChange={(e) => set('area')(e.target.value)} placeholder="For example: 15132 or McKeesport" aria-describedby="pr-count" /></div>
             <div className="field"><label htmlFor="pr-q">Name or keyword</label>
               <input className="input" id="pr-q" type="search" value={f.q} onChange={(e) => set('q')(e.target.value)} placeholder="For example: Mercy, methadone, LGBTQ" /></div>
             <label className="check-row asc-pr-county"><input type="checkbox" checked={f.inCounty} onChange={(e) => set('inCounty')(e.target.checked)} />Only sites in Allegheny County</label>
           </form>
           {NOT_COVERED[forNeed] && <p className="notice"><Icon name="info" size={16} /><span>{NOT_COVERED[forNeed]}</span></p>}
           {coverage === 'Medical Assistance or HealthChoices' && <p className="asc-hint is-icon"><Icon name="info" size={14} />They have Medical Assistance: check the provider is in Community Care’s network (Member Services 800-553-7499).</p>}
-          <p className="asc-pr-count" role="status">{results.length ? results.length + (results.length === 1 ? ' provider' : ' providers') + ', ' + sites + (sites === 1 ? ' site' : ' sites') : 'No providers match. Try fewer filters, or turn off “Only sites in Allegheny County”.'}</p>
+          <p className="asc-pr-count" id="pr-count" role="status">{results.length ? results.length + (results.length === 1 ? ' provider' : ' providers') + ', ' + sites + (sites === 1 ? ' site' : ' sites') + sortNote + '.' : 'No providers match. Try fewer filters, or turn off “Only sites in Allegheny County”.'}</p>
+          {place && <p className="asc-hint">Distances are straight-line, from the middle of the ZIP or town. The trip will be longer.</p>}
           {results.length > 0 && (
             <ul className="asc-pr-list" aria-label="Providers">
               {results.slice(0, shown).map((r, i) => <Result key={r.provider.id} r={r} idx={i} labels={meta.labels} pops={meta.pops} onPick={pick} />)}

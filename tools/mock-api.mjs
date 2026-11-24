@@ -83,9 +83,12 @@ async function handleApi(req, res, path, query) {
   }
   if (LATENCY) await new Promise((r) => setTimeout(r, LATENCY));
   if (FAIL && path.includes(FAIL)) return send(res, 500, { error: 'Mock failure for ' + path });
-  // The provider directory is a published file; the API serves it as is.
+  // The provider directory is a published file; the API serves it with the ZIP centroids that sort it by distance.
   if (req.method === 'GET' && path === '/asc/provider-directory') {
-    try { return send(res, 200, JSON.parse(readFileSync(join(ROOT, 'data', 'bh-providers.json'), 'utf8'))); } catch (e) { return send(res, 500, { error: 'Provider directory unavailable.' }); }
+    let dir;
+    try { dir = JSON.parse(readFileSync(join(ROOT, 'data', 'bh-providers.json'), 'utf8')); } catch (e) { return send(res, 500, { error: 'Provider directory unavailable.' }); }
+    try { dir.zips = JSON.parse(readFileSync(join(ROOT, 'data', 'zip-centroids.json'), 'utf8')).zips; } catch (e) { dir.zips = {}; }
+    return send(res, 200, dir);
   }
   for (const [method, re, fn] of routes) {
     const m = path.match(re);

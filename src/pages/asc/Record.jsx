@@ -3,7 +3,7 @@
 import React from 'react';
 import { Icon } from '../../ui/icons.jsx';
 import { useSession } from '../../state/data.js';
-import { usDate, clockTime, minutesBetween, shown, CHANNELS } from '../../data/asc.js';
+import { usDate, clockTime, minutesBetween, shown, CHANNELS, REACH_FIELDS, DEMO_FIELDS } from '../../data/asc.js';
 import { ScreeningSummary, Badge } from './parts.jsx';
 
 const IDENTITY = { matched: 'Matched in MCI and enrolled in ASC', new: 'Registered in MCI and enrolled in ASC', unverified: 'Name only, not verified' };
@@ -27,9 +27,12 @@ export function ContactRecord({ r }) {
   const i = r.intake;
   const end = r.endedAt;
   const p = (s) => 'rec-' + r.id + '-' + s;
-  const caller = i.caller === 'Other' ? i.callerOther || 'Other' : i.caller;
   const who = r.clientId ? IDENTITY[r.identity] || IDENTITY.matched : r.identity === 'unverified' ? IDENTITY.unverified + (r.unverifiedName ? ': ' + r.unverifiedName : '')
-    : r.path === 'anon' ? 'Anonymous' + [r.anon.name, r.anon.zip, r.anon.language !== 'English' ? r.anon.language : ''].filter(Boolean).map((x, n) => (n ? ', ' : ': ') + x).join('') : 'Not identified';
+    : r.path === 'anon' ? 'Anonymous' + [r.anon.name, r.anon.zip].filter(Boolean).map((x, n) => (n ? ', ' : ': ') + x).join('') : 'Not identified';
+  const given = [i.clientFirst, i.clientLast].filter(Boolean).join(' ');
+  // Only what was given or changed on this contact; what was already on file isn't repeated.
+  const reach = REACH_FIELDS.filter(([key]) => r.reach[key]).map(([key, label]) => [label, r.reach[key]]);
+  const demo = DEMO_FIELDS.filter(([key]) => r.demo[key]).map(([key, label]) => [label, key === 'dob' ? usDate(r.demo.dob) : r.demo[key]]);
   return (
     <div className="asc-record">
       <Block id={p('contact')} title="Contact" icon="headset">
@@ -44,14 +47,20 @@ export function ContactRecord({ r }) {
         <Pairs rows={[
           ['Safety', i.safety === 'Yes' ? 'Yes, routed to crisis' : or(i.safety)],
           r.channel === 'person' && ['Where they talked', or(i.privacy)],
-          ['Caller', caller ? shown(caller) + (i.callerName ? ' (' + i.callerName + ')' : '') : '—'],
-          ['Person who needs help', or(i.age)],
+          ['Caller', i.caller ? shown(i.caller) + (i.callerDetail ? ': ' + i.callerDetail : '') : '—'],
+          given && ['Client, as given', given],
+          ['Age group', or(i.age)],
           i.reason && ['Reason for calling', i.reason === 'Something else' ? or(i.reasonText) : shown(i.reason)],
           ['Coverage', i.coverage ? shown(i.coverage) + (i.coverageDetail ? ': ' + i.coverageDetail : '') : '—'],
-          ['How they found us', i.found === 'Other' ? or(i.foundOther) : or(i.found)]
+          ['How they found us', i.found ? shown(i.found) + (i.foundDetail ? ': ' + i.foundDetail : '') : '—']
         ]} />
         {i.story && <blockquote className="asc-record-quote"><span className="field-label">In their words</span>{i.story}</blockquote>}
       </Block>
+      {(reach.length > 0 || demo.length > 0) && (
+        <Block id={p('reach')} title="Contact info and demographics given" icon="phone">
+          <Pairs rows={reach.concat(demo)} />
+        </Block>
+      )}
       <Block id={p('screen')} title="Screening" icon="check" wide>
         <ScreeningSummary screening={r.screening} />
       </Block>

@@ -9,10 +9,57 @@ export const SUPERVISOR = 'ASC Supervisor';
 // Safety: No, or Yes (which opens urgent routing). Nothing chosen means it hasn't been asked yet.
 export const SAFETY = ['No'];
 export const CALLERS = ['The client', 'Parent or guardian', 'Other family', 'Provider for their client', 'School, CYF, hospital or jail', 'Other'];
-export const AGES = ['Child, 0–17', 'Adult, 18–59', 'Older adult, 60+', 'Not sure'];
+// What more to ask about the caller, under whichever answer is chosen.
+export const CALLER_DETAIL = {
+  'The client': { label: 'Anything to note about them', placeholder: 'For example: calling from a friend’s phone' },
+  'Parent or guardian': { label: 'Their name and relationship', placeholder: 'For example: Maria Ruiz, mother' },
+  'Other family': { label: 'Their name and relationship', placeholder: 'For example: Sam, older brother' },
+  'Provider for their client': { label: 'Their name, agency and callback number', placeholder: 'For example: Dana Ruiz, case manager at Mercy, 412-555-0100' },
+  'School, CYF, hospital or jail': { label: 'Their name, where they work and callback number', placeholder: 'For example: Ms. Park, counselor at Allderdice' },
+  Other: { label: 'Who is calling?', placeholder: 'For example: neighbor, pastor, landlord' }
+};
+// Age groups don't overlap. Transition-age youth (18–25) is its own group because many services are set up for it.
+export const AGES = ['Child, 0–17', 'Transition-age youth, 18–25', 'Adult, 26–59', 'Older adult, 60+', 'Not sure'];
+export const CHILD = AGES[0];
+// The age group for a date of birth (MM/DD/YYYY or YYYY-MM-DD), or null when there isn't one.
+export function ageGroupFor(dob, now = new Date()) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(dob || '') || /^(\d{4})-(\d{2})-(\d{2})$/.exec(dob || '');
+  if (!m) return null;
+  const [y, mo, d] = m[1].length === 4 ? [+m[1], +m[2], +m[3]] : [+m[3], +m[1], +m[2]];
+  let age = now.getFullYear() - y;
+  if (now.getMonth() + 1 < mo || (now.getMonth() + 1 === mo && now.getDate() < d)) age--;
+  return age < 18 ? AGES[0] : age <= 25 ? AGES[1] : age < 60 ? AGES[2] : AGES[3];
+}
 export const REASONS = ['Find services', 'Question about coverage', 'Following up on an earlier contact', 'Referring someone', 'Something else'];
 export const COVERAGE = ['Medical Assistance or HealthChoices', 'Medicare', 'Private insurance', 'None', 'Doesn’t know'];
 export const FOUND = ['On their own', 'Provider', 'School', 'CYF', 'Hospital', 'Jail', '211', 'Other'];
+export const FOUND_DETAIL = {
+  'On their own': { label: 'How? (optional)', placeholder: 'For example: web search, a flyer, a friend' },
+  Provider: { label: 'Which provider? (optional)', placeholder: 'For example: their therapist at Mercy' },
+  School: { label: 'Which school? (optional)', placeholder: 'For example: the counselor at Allderdice' },
+  CYF: { label: 'Caseworker or office (optional)', placeholder: 'For example: their CYF caseworker in Hazelwood' },
+  Hospital: { label: 'Which hospital? (optional)', placeholder: 'For example: discharge planner at UPMC Mercy' },
+  Jail: { label: 'Which facility? (optional)', placeholder: 'For example: Allegheny County Jail reentry' },
+  '211': { label: 'Anything else? (optional)', placeholder: 'For example: 211 text line' },
+  Other: { label: 'How did they find us?', placeholder: 'For example: flyer at the library' }
+};
+// How to reach the person, and demographics: shown in intake. For a known client both start from what's on file.
+export const REACH_FIELDS = [['street', 'Street address'], ['city', 'City'], ['state', 'State'], ['zip', 'ZIP'], ['phone', 'Phone'], ['email', 'Email']];
+export const DEMO_FIELDS = [['dob', 'Date of birth'], ['gender', 'Gender'], ['legalSex', 'Legal sex'], ['race', 'Race'], ['ethnicity', 'Ethnicity'], ['language', 'Primary language'], ['marital', 'Marital status'], ['living', 'Living arrangement']];
+export const DEMO_OPTIONS = {
+  gender: ['Female', 'Male', 'Nonbinary', 'Another identity', 'Prefers not to say'],
+  legalSex: ['Female', 'Male', 'X', 'Unknown'],
+  race: ['American Indian or Alaska Native', 'Asian', 'Black or African American', 'Native Hawaiian or Pacific Islander', 'White', 'Two or more races', 'Unknown', 'Prefers not to say'],
+  ethnicity: ['Hispanic/Latinx', 'Not Hispanic/Latinx', 'Unknown', 'Prefers not to say'],
+  language: ['English', 'Spanish', 'Nepali', 'Arabic', 'Swahili', 'Other'],
+  marital: ['Never Married/Single', 'Married', 'Divorced', 'Separated', 'Widowed', 'Unknown'],
+  living: ['Independent', 'With family', 'Shelter', 'Supported housing', 'Unhoused', 'In jail', 'Unknown']
+};
+export const blankReach = () => ({ street: null, city: null, state: null, zip: null, phone: null, email: null });
+export const blankDemo = () => ({ dob: null, gender: null, legalSex: null, race: null, ethnicity: null, language: null, marital: null, living: null });
+// What shows in a field: what the coordinator typed on this contact, or else what's on file. null means "not changed".
+export const effective = (mine, known, key) => (mine && mine[key] != null ? mine[key] : (known && known[key]) || '');
+export const reachChanged = (k) => Object.keys(k.reach || {}).some((key) => k.reach[key] != null && k.reach[key] !== ((k.known && k.known.reach[key]) || ''));
 export const PRIVACY = ['Private room', 'Shared space, like a lobby'];
 export const URGENCY = ['Routine', 'Urgent', 'Crisis'];
 export const NEED_OPTIONS = ['Mental health services for a child', 'Mental health, adult', 'Substance use treatment', 'Health coverage (MA or HealthChoices)', 'Housing', 'Food or other benefits', 'Physical health care', 'Rides to care (MATP)'];
@@ -27,7 +74,7 @@ export const SCREENING = [
 ];
 // "Skip" replaced "Not sure" and "Prefers not to say" (v4.1). Older answers keep their meaning.
 export const SKIP = 'Skip';
-export const needForScreen = (q, age) => (q.need === 'MH' ? (age === 'Child, 0–17' ? 'Mental health services for a child' : 'Mental health, adult') : q.need);
+export const needForScreen = (q, age) => (q.need === 'MH' ? (age === CHILD ? 'Mental health services for a child' : 'Mental health, adult') : q.need);
 export const isConcern = (q, answer) => q.concern.indexOf(answer) >= 0;
 
 export const IX_TYPES = ['Information and resources [code TBD]', 'Benefit Assistance · T1016BA', 'Service Planning and Coordination · T1016SP', 'Casefinding [code TBD]', 'Liability determination [code TBD]'];
@@ -57,11 +104,33 @@ export const PRESETS = [
 export const OUTCOMES = ['Still open', 'Info given', 'Connected', 'Handed off', 'Sent to crisis', 'Couldn’t help', 'Declined'];
 export const OPEN = OUTCOMES[0];
 export const CRISIS = OUTCOMES[4];
+// The outcome a need's interactions point to, so the coordinator confirms it rather than picks it. The strongest
+// hand-off wins: walked over or warm-transferred is Connected, a cold transfer is Handed off, a name or number is
+// Info given. A reminder still open on one of its interactions keeps the need open. Returns null with nothing to go on.
+const HOW_OUTCOME = { 'Warm transfer': 'Connected', 'Walked them to the provider': 'Connected', Transferred: 'Handed off' };
+export function suggestOutcome(k, need, isOpenAction = () => false) {
+  if (k.urgent && k.urgent.need === need.name) return { outcome: CRISIS, why: 'Sent to ' + shown(k.urgent.dest) + '.' };
+  const real = (x) => String(x.what || '').trim() || (x.referral && x.referral.name);
+  let list = k.interactions.filter((x) => x.need === need.name && real(x));
+  if (!list.length && k.needs.length === 1) list = k.interactions.filter(real); // one need: everything was for it
+  if (!list.length) return null;
+  const name = (x) => (x.referral && x.referral.name ? x.referral.name + (x.referral.site && x.referral.site !== x.referral.name ? ', ' + x.referral.site : '') : shown(x.what));
+  const open = list.find((x) => k.links.some((l) => !l.auto && l.ixId === x.id && isOpenAction(l.actionId)));
+  if (open) return { outcome: OPEN, why: 'A reminder on ' + name(open) + ' is still open.' };
+  const by = (o) => list.find((x) => HOW_OUTCOME[x.how] === o);
+  const c = by('Connected'), h = by('Handed off');
+  if (c) return { outcome: 'Connected', why: (c.how === 'Warm transfer' ? 'Warm transfer to ' : 'Walked them to ') + name(c) + '.' };
+  if (h) return { outcome: 'Handed off', why: 'Transferred to ' + name(h) + '.' };
+  const r = list.find((x) => x.referral && x.referral.name) || list[0];
+  return { outcome: 'Info given', why: (r.referral && r.referral.name ? 'Referred to ' : '') + name(r) + ' (' + shown(r.how).toLowerCase() + ').' };
+}
 // Names used before v4.1, and what they are now. The server upgrades stored contacts once.
 export const LEGACY = {
   outcome: { 'Keep open with a follow-up': OPEN, 'Information given': 'Info given', 'Transferred to crisis': CRISIS, 'Unable to assist': 'Couldn’t help' },
   safety: { 'Asked: no danger now': 'No', 'Not asked yet': null, 'Yes: routed to crisis': 'Yes' },
-  screening: { 'Not sure': SKIP, 'Prefers not to say': SKIP }
+  screening: { 'Not sure': SKIP, 'Prefers not to say': SKIP },
+  // v4.6 split 18–59 into 18–25 and 26–59. Contacts without a date of birth to go by become 26–59.
+  age: { 'Adult, 18–59': 'Adult, 26–59' }
 };
 // Placeholders like "[code TBD]" stay in the data for the team, and are hidden from coordinators.
 export const shown = (s) => String(s == null ? '' : s).replace(/\s*\[[^\]]*\]/g, '').trim();
@@ -152,6 +221,10 @@ export function reportingIssues(contact) {
 
 // Steps of a contact, in order, with whether each is done.
 export const STEPS = [['intake', 'Intake'], ['identify', 'Identify'], ['interactions', 'Interactions'], ['wrap-up', 'Wrap Up']];
+// Identify is left out when the person was known before it: the contact started from their record, or they were
+// found during intake. There's nothing left to do there.
+export const skipsIdentify = (k) => !!k.clientId && (k.identifiedIn === 'profile' || k.identifiedIn === 'intake');
+export const stepsFor = (k) => (skipsIdentify(k) ? STEPS.filter((s) => s[0] !== 'identify') : STEPS);
 export function stepState(contact) {
   const i = contact.intake;
   const screened = SCREENING.filter((q) => contact.screening[q.key]).length;
@@ -213,8 +286,11 @@ export function summaryNote(k, staffName) {
   const end = k.endedAt || new Date().toISOString();
   const lines = [];
   lines.push('ASC ' + lower(CHANNELS[k.channel] || CHANNELS.phone) + ' summary, ' + usDate(k.startedAt) + ', ' + clockTime(k.startedAt) + '–' + clockTime(end) + ' (' + minutesBetween(k.startedAt, end) + ' min), ' + staffName + '.');
-  const caller = k.intake.caller === 'Other' ? k.intake.callerOther || 'Other' : k.intake.caller;
-  if (caller) lines.push('Caller: ' + lower(caller) + (k.intake.callerName ? ' (' + k.intake.callerName + ')' : '') + '.');
+  const i = k.intake;
+  if (i.caller) lines.push('Caller: ' + lower(i.caller) + (i.callerDetail ? ' (' + i.callerDetail.trim() + ')' : '') + '.');
+  const given = [i.clientFirst, i.clientLast].filter(Boolean).join(' ');
+  if (!k.clientId && given) lines.push('Client, as given: ' + given + '.');
+  if (i.age) lines.push('Age group: ' + lower(i.age) + '.');
   const reason = k.intake.reason === 'Something else' ? k.intake.reasonText || 'something else' : k.intake.reason;
   if (reason) lines.push('Reason: ' + lower(reason) + '.');
   if (k.intake.story) lines.push('In their words: ' + k.intake.story.trim());

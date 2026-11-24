@@ -161,8 +161,23 @@ export function Toast() {
     const timer = setTimeout(() => toast(null), t.undo || t.error ? 6000 : 2600);
     return () => clearTimeout(timer);
   }, [t && t.id]);
+  // A toast never covers what has keyboard focus: when focus lands under it, it moves to the top of the screen.
+  const root = useRef(null);
+  const [top, setTop] = useState(false);
+  useEffect(() => {
+    if (!t) { setTop(false); return undefined; }
+    const check = () => {
+      const box = root.current && root.current.firstElementChild, a = document.activeElement;
+      if (!box || !a || a === document.body || !a.matches(':focus-visible')) return; // keyboard focus only: a toast doesn't jump under the mouse
+      const r = a.getBoundingClientRect(), b = box.getBoundingClientRect();
+      if (r.bottom > b.top - 8 && r.top < b.bottom + 8 && r.right > b.left && r.left < b.right) setTop(true);
+    };
+    check();
+    document.addEventListener('focusin', check);
+    return () => document.removeEventListener('focusin', check);
+  }, [t && t.id]);
   return (
-    <div className="toast-root" role="status" aria-live="polite">
+    <div className={'toast-root' + (top ? ' is-top' : '')} role="status" aria-live="polite" ref={root}>
       {t && (
         <div className={'toast' + (t.error ? ' is-error' : '')}>
           <span>{t.text}</span>

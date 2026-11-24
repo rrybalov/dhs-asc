@@ -2,7 +2,7 @@
 // walkthrough), six clients already enrolled with past contacts, and two anonymous calls from Jayden's mother.
 // Everything is fictional. Values come from fixed lists and a hash of the client id, not the main random
 // stream, so adding ASC leaves every other sample record exactly as it was.
-import { addBusinessDays, addDaysOnWeekday, isoDate } from './asc.js';
+import { addBusinessDays, addDaysOnWeekday, isoDate, ageGroupFor } from './asc.js';
 
 export const ASC_COLAB = { id: 'ASC', name: 'ASC', tag: 'ASC' };
 export const ASC_ENROLLMENT = 'Administrative Service Coordination (ASC)';
@@ -36,8 +36,8 @@ function blankContact(id, n, t) {
     id, ref: ref(n), channel: 'phone', logId: 'CL-4417-' + String(2200 + n), site: '',
     startedAt: '', endedAt: null, status: 'closed', closedKind: null, staff: 'u1',
     clientId: null, identity: null, candidateId: null, possibleClientId: null, path: null, group: '', priorRefs: [], linkedPrior: null,
-    anon: { name: '', zip: '', county: 'Allegheny', language: 'English' }, unverifiedName: '',
-    intake: { safety: 'Asked: no danger now', caller: 'The client', callerOther: '', callerName: '', age: 'Adult, 18–59', story: '', reason: 'Find services', reasonText: '', coverage: 'Medical Assistance or HealthChoices', coverageDetail: '', found: 'On their own', foundOther: '', privacy: null, callerConfirmed: null, coverageConfirmed: null },
+    anon: { name: '', zip: '', county: 'Allegheny', language: 'English' }, unverifiedName: '', identifiedIn: null,
+    intake: { safety: 'Asked: no danger now', caller: 'The client', callerDetail: '', clientFirst: '', clientLast: '', age: 'Adult, 26–59', story: '', reason: 'Find services', reasonText: '', coverage: 'Medical Assistance or HealthChoices', coverageDetail: '', found: 'On their own', foundDetail: '', privacy: null, callerConfirmed: null, coverageConfirmed: null },
     screening: { mh: 'No', ph: 'Yes, OK', house: 'Yes, stable', food: 'Yes', su: 'No' },
     needs: [], interactions: [], followUp: { ok: null, how: 'Phone call', time: '' }, onsite: { idCheck: null, consentSigned: '', docs: [] },
     notes: [], actions: [], links: [], urgent: null, createdAt: t.toISOString()
@@ -75,7 +75,7 @@ export function seedAsc(db, t) {
     x.channel = e.channel; if (e.channel === 'person') { x.logId = 'VS-0912-' + String(4400 + n); x.site = 'Mercy Behavioral Health'; }
     x.startedAt = at(t, e.days, 10 + (k % 5), 5 * k); x.endedAt = later(x.startedAt, e.min + 4);
     x.staff = e.staff; x.clientId = c.id; x.identity = 'matched'; x.path = 'client'; x.closedKind = 'client';
-    x.intake.age = c.dob && Number(c.dob.slice(-4)) > t.getFullYear() - 18 ? 'Child, 0–17' : 'Adult, 18–59';
+    x.intake.age = ageGroupFor(c.dob, start) || 'Adult, 26–59';
     x.intake.story = e.note;
     Object.assign(x.screening, e.screen);
     x.needs = [{ id: 'n1', name: e.need, urg: e.urg, outcome: e.open ? 'Keep open with a follow-up' : 'Connected', outcomeNote: '' }];
@@ -99,7 +99,7 @@ export function seedAsc(db, t) {
     const x = blankContact('k172', 172, t);
     x.startedAt = at(t, -20, 15, 10); x.endedAt = later(x.startedAt, 9);
     x.staff = 'u6'; x.clientId = 'c33'; x.identity = 'matched'; x.path = 'client'; x.closedKind = 'client';
-    x.intake.age = 'Adult, 18–59'; x.intake.story = 'Asked about peer support groups while waiting for counseling to start.';
+    x.intake.age = ageGroupFor(clientById.c33.dob, t) || 'Adult, 26–59'; x.intake.story = 'Asked about peer support groups while waiting for counseling to start.';
     x.needs = [{ id: 'n1', name: 'Mental health, adult', urg: 'Routine', outcome: 'Information given', outcomeNote: '' }];
     x.interactions = [ix('i1', 'Peer support groups near Mercy', 'Mental health, adult', 'Information and resources [code TBD]', 'Explained by phone', 7, 'Telephone [code TBD]')];
     x.followUp = { ok: 'Yes', how: 'Phone call', time: '' };
@@ -112,7 +112,7 @@ export function seedAsc(db, t) {
     x.startedAt = at(t, days, h, 5); x.endedAt = later(x.startedAt, list.reduce((s, i) => s + Number(i.min), 0) + 2);
     x.staff = staff; x.path = 'anon'; x.closedKind = 'anon'; x.group = 'g-ruiz'; x.possibleClientId = 'c65';
     x.anon = { name: 'Maria', zip: '15210', county: 'Allegheny', language: 'English' };
-    Object.assign(x.intake, { caller: 'Parent or guardian', age: 'Child, 0–17', story: note, coverage: 'Medical Assistance or HealthChoices', found: 'School' });
+    Object.assign(x.intake, { caller: 'Parent or guardian', callerDetail: 'Maria, his mother', age: 'Child, 0–17', story: note, coverage: 'Medical Assistance or HealthChoices', found: 'School' });
     x.screening = { mh: 'Yes', ph: 'Yes, OK', house: 'Yes, stable', food: null, su: null };
     x.needs = [{ id: 'n1', name: need, urg, outcome, outcomeNote: '' }];
     x.interactions = list;

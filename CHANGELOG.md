@@ -2,6 +2,49 @@
 
 Each version is kept on an `archive/` branch. See "Versions and rolling back" in the README.
 
+## v4.6: Intake asks who the client is; interactions start ready to fill in
+
+**Intake.**
+- **Caller details:** a text box appears under whichever caller answer is chosen, labeled for it. For example, "Their name, agency and callback number" for a provider. It replaces "Other: who is calling?" and the separate caller's name.
+- **Who the client is:** instead of the caller's name, intake asks for the client's first name, last name and date of birth, as the caller gives them. Search MCI runs from there.
+  - Picking a match puts the contact on their record and enrolls them in ASC straight away.
+  - The old "Look Up Caller" button is now "Returning Caller", for reference numbers only.
+- **How to reach them:** street, city, state, ZIP, phone and email.
+  - For a known client, the fields start with what's on file (the latest ASC-reported info, else their address, phone and email).
+  - Changing anything saves a new address record on their record, sourced to OBH / DCS - Administrative Service Coordination (code ASC). Earlier ASC-reported records are ended. "Use What's on File" undoes the change.
+  - For someone anonymous, the fields start blank and stay with the contact. If they're found later, the info goes on their record.
+- **Demographics:** date of birth, gender, legal sex, race, ethnicity, language, marital status and living arrangement, behind Show Demographics. They're kept with the contact and don't change MCI.
+- **Ages:** a separate group for transition-age youth, 18–25. The groups don't overlap: 0–17, 18–25, 26–59, 60+.
+  - A date of birth (typed in, or on file) picks the group.
+  - Stored "Adult, 18–59" answers are upgraded by date of birth, else to 26–59.
+  - Find a Provider searches for transition-age youth.
+- **How they found us:** a text box appears under whichever answer is chosen. For example, "Which school?".
+
+**No Identify step when the person is already known.** A contact started from a client's record, or one where the client was found during intake, goes Intake → Interactions → Wrap Up. Earlier anonymous contacts that may be theirs are offered on Intake instead. Old links to Identify go to Interactions.
+
+**Interactions.**
+- **No empty state:** the step opens with a blank interaction to fill in. A blank card isn't saved until something is typed or picked.
+- **Add Interaction:** the button sits by the Service interactions heading and opens another blank card. It replaces the "Add an interaction" box.
+- **Common resources:** they're picked from the Resource field and fill in their type and how, as before.
+- **Order:** service interactions now come before Follow-up and the on-site steps.
+
+**Find a Provider sorts by distance.**
+- A ZIP, town or Pittsburgh neighborhood sorts every match by distance from it, instead of filtering. Each site shows "About N mi".
+- The search starts from the person's ZIP when intake has one.
+- Distances are straight-line, from ZIP centroids in `data/zip-centroids.json`. That's 2,213 Pennsylvania ZIPs plus every directory ZIP, from the BSD-licensed `zipcodes` package data.
+- Other text still filters by address.
+
+**Wrap Up fills in outcomes.**
+- Each need's outcome is filled in from its interactions, with the reason shown:
+  - Warm transfer or walked over: Connected.
+  - Transferred: Handed off.
+  - A referral or number given: Info given.
+  - A reminder still open on one of its interactions: Still open.
+- It follows the interactions until the coordinator picks an outcome themselves. A cleared choice stays cleared.
+- The log marks outcomes filled in this way.
+
+**Data.** Contacts gain `reach`, `demo`, `known` (read-only) and `identifiedIn`. Intake swaps `callerOther`, `callerName` and `foundOther` for `callerDetail`, `clientFirst`, `clientLast` and `foundDetail`. Needs gain `outcomeAuto`. Stored data is upgraded once (`ascModel` 5). See docs/API.md.
+
 ## v4.5: Find a Provider
 
 **Find a Provider.** The Interactions step can now search the behavioral health provider directory (`data/bh-providers.json`), so coordinators refer people to a specific program instead of searching the web.

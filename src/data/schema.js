@@ -65,13 +65,18 @@
  * `clientId` is set once the person is identified and enrolled. Times are ISO 8601; due dates yyyy-mm-dd.
  * @typedef {{ providerId: string, facilityId: string, name: string, site: string, phone: string, address: string }} Referral
  * @typedef {{ id: string, what: string, need: string, type: string, how: string, min: string, place: string, notes: string, referral: Referral|null }} Interaction
- * @typedef {{ id: string, name: string, urg: 'Routine'|'Urgent'|'Crisis', outcome: string, outcomeNote: string }} Need
+ * @typedef {{ id: string, name: string, urg: 'Routine'|'Urgent'|'Crisis', outcome: string, outcomeNote: string, outcomeAuto: boolean|null }} Need
+ * outcomeAuto: true when the outcome was filled in from the interactions, false once the coordinator chose it (even blank).
+ * Contact info and demographics typed on this contact. null is "not changed": the screen shows what's on file (`known`).
+ * @typedef {{ street: string|null, city: string|null, state: string|null, zip: string|null, phone: string|null, email: string|null }} Reach
+ * @typedef {{ dob: string|null, gender: string|null, legalSex: string|null, race: string|null, ethnicity: string|null, language: string|null, marital: string|null, living: string|null }} Demographics
  * @typedef {{
  *   id: string, ref: string, channel: 'phone'|'person', logId: string, site: string, startedAt: string, endedAt: string|null,
  *   status: 'open'|'closed', closedKind: 'anon'|'client'|'urgent'|null, staff: string,
  *   clientId: string|null, identity: 'matched'|'new'|'unverified'|null, candidateId: string|null, path: 'anon'|'client'|null,
  *   group: string, priorRefs: string[], linkedPrior: 'linked'|'no'|null, unverifiedName: string,
- *   anon: { name: string, zip: string, county: string, language: string },
+ *   anon: { name: string, zip: string, county: string, language: string }, reach: Reach, demo: Demographics,
+ *   known: { reach: Reach, demo: Demographics, source: string, asOf: string }|null, identifiedIn: 'profile'|'intake'|'identify'|null,
  *   intake: Object<string, string|null>, screening: Object<string, string|null>, needs: Need[], interactions: Interaction[],
  *   followUp: { ok: 'Yes'|'No'|null, how: string, time: string }, onsite: { idCheck: string|null, consentSigned: string, docs: string[] },
  *   notes: Note[], actions: ActionItem[], links: { actionId: string, ixId: string|null, auto: 'd7'|'d90'|null }[],
@@ -177,8 +182,12 @@ export function normalizeProvider(p) {
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
 const strOrNull = (v) => (v == null || v === '' ? null : String(v));
 const strMap = (o, keys) => { const out = {}; keys.forEach((k) => { out[k] = k in o ? (o[k] == null ? null : String(o[k])) : null; }); return out; };
-const INTAKE_KEYS = ['safety', 'caller', 'callerOther', 'callerName', 'age', 'story', 'reason', 'reasonText', 'coverage', 'coverageDetail', 'found', 'foundOther', 'privacy', 'callerConfirmed', 'coverageConfirmed'];
-const TEXT_KEYS = ['callerOther', 'callerName', 'story', 'reasonText', 'coverageDetail', 'foundOther'];
+const INTAKE_KEYS = ['safety', 'caller', 'callerDetail', 'clientFirst', 'clientLast', 'age', 'story', 'reason', 'reasonText', 'coverage', 'coverageDetail', 'found', 'foundDetail', 'privacy', 'callerConfirmed', 'coverageConfirmed'];
+const TEXT_KEYS = ['callerDetail', 'clientFirst', 'clientLast', 'story', 'reasonText', 'coverageDetail', 'foundDetail'];
+const REACH_KEYS = ['street', 'city', 'state', 'zip', 'phone', 'email'];
+const DEMO_KEYS = ['dob', 'gender', 'legalSex', 'race', 'ethnicity', 'language', 'marital', 'living'];
+// What's on file for the client, before this contact: shown in intake, where the coordinator can update it.
+const normalizeKnown = (kn) => (kn ? { reach: strMap(obj(kn.reach), REACH_KEYS), demo: strMap(obj(kn.demo), DEMO_KEYS), source: str(kn.source), asOf: str(kn.asOf) } : null);
 
 /** @returns {ContactSummary} */
 export function normalizeContactSummary(k) {
@@ -203,7 +212,8 @@ export function normalizeContact(k) {
     group: str(k.group), priorRefs: arr(k.priorRefs).map(str), linkedPrior: strOrNull(k.linkedPrior), unverifiedName: str(k.unverifiedName),
     anon: { name: str(a.name), zip: str(a.zip), county: str(a.county) || 'Allegheny', language: str(a.language) || 'English' },
     intake, screening: strMap(obj(k.screening), ['mh', 'ph', 'house', 'food', 'su']),
-    needs: arr(k.needs).map((n, i) => ({ id: str(n.id) || 'n' + i, name: str(n.name), urg: str(n.urg) || 'Routine', outcome: str(n.outcome), outcomeNote: str(n.outcomeNote) })),
+    reach: strMap(obj(k.reach), REACH_KEYS), demo: strMap(obj(k.demo), DEMO_KEYS), known: normalizeKnown(k.known), identifiedIn: strOrNull(k.identifiedIn),
+    needs: arr(k.needs).map((n, i) => ({ id: str(n.id) || 'n' + i, name: str(n.name), urg: str(n.urg) || 'Routine', outcome: str(n.outcome), outcomeNote: str(n.outcomeNote), outcomeAuto: n.outcomeAuto === true ? true : n.outcomeAuto === false ? false : null })),
     interactions: arr(k.interactions).map((x, i) => ({ id: str(x.id) || 'i' + i, what: str(x.what), need: str(x.need), type: str(x.type), how: str(x.how), min: str(x.min), place: str(x.place), notes: str(x.notes), referral: normalizeIxReferral(x.referral) })),
     followUp: { ok: f.ok === 'Yes' || f.ok === 'No' ? f.ok : null, how: str(f.how) || 'Phone call', time: str(f.time) },
     onsite: { idCheck: strOrNull(o.idCheck), consentSigned: str(o.consentSigned), docs: arr(o.docs).map(str) },
@@ -287,6 +297,7 @@ export function normalizeIxReferral(r) {
 // The behavioral health provider directory is used as published (data/bh-providers.json); this only checks its shape.
 export function normalizeDirectory(d) {
   const o = obj(d);
+  o.zips = obj(o.zips); // ZIP centroids for distance, when the source sent them
   if (!Array.isArray(o.providers) || !o.vocabularies || !Array.isArray(o.vocabularies.services)) throw new Error('The provider directory didn’t load correctly.');
   return o;
 }

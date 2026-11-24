@@ -2,7 +2,7 @@
 // follow-ups, and contact history. Like backend.js, these run in the browser's sample-data source and in
 // tools/mock-api.mjs. docs/API.md describes the endpoints.
 import { NotFound, BadRequest, Forbidden, summary, fullRecord, newId, createNote } from './backend.js';
-import { followUpPlan, SCREENING, totals, plural, summaryNote, isSummaryNote, LEGACY, OPEN, CRISIS, SUPERVISOR, addBusinessDays, dayOf, shown, DISCHARGE_REASONS } from './asc.js';
+import { followUpPlan, SCREENING, totals, plural, summaryNote, isSummaryNote, LEGACY, OPEN, CRISIS, SUPERVISOR, addBusinessDays, dayOf, shown, DISCHARGE_REASONS, ageGroupFor, blankReach, blankDemo, REACH_FIELDS, DEMO_FIELDS } from './asc.js';
 const DISCHARGE_REASONS_SET = new Set(DISCHARGE_REASONS);
 import { describePatch, appendLog, backfillLog } from './asc-log.js';
 import { ASC_ENROLLMENT } from './asc-seed.js';
@@ -12,7 +12,7 @@ const usOf = (d) => pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + '/' + d.get
 const findContact = (db, id) => { const k = (db.contacts || []).find((x) => x.id === id); if (!k) throw new NotFound('Contact'); return k; };
 const findClient = (db, id) => { const c = db.clients.find((x) => x.id === id); if (!c) throw new NotFound('Client'); return c; };
 const clone = (v) => JSON.parse(JSON.stringify(v));
-const ensure = (db) => { if (!db.contacts) db.contacts = []; if (!db.contactSeq) db.contactSeq = 184; if (db.ascModel !== 4) migrate(db); };
+const ensure = (db) => { if (!db.contacts) db.contacts = []; if (!db.contactSeq) db.contactSeq = 184; if (db.ascModel !== 5) migrate(db); };
 
 // v4.1 renamed outcomes, merged screening's "Not sure" and "Prefers not to say" into "Skip", shortened the safety
 // answer and added roles. Stored data is upgraded once, in place.
@@ -26,11 +26,29 @@ function migrate(db) {
     if (!k.corrections) k.corrections = [];
     if (k.correction === undefined) k.correction = null;
     backfillLog(k); // v4.2: a step-by-step log, built from the answers for contacts saved before it existed
+    upgradeIntake(db, k); // v4.6
   });
   (db.staff || []).forEach((s) => { if (!s.role && ROLES[s.id]) s.role = ROLES[s.id]; });
   (db.clients || []).forEach((c) => syncAscService(db, c));
   if (!db.closeouts) seedCloseout(db); // v4.3: one request waiting, so the supervisor's queue isn't empty
-  db.ascModel = 4;
+  db.ascModel = 5;
+}
+// v4.6: one detail box under each caller and "how they found us" answer (replacing "Other" and the caller's name),
+// the client's name as the caller gives it, contact info and demographics, and the 18–25 age group.
+function upgradeIntake(db, k) {
+  const i = k.intake || (k.intake = {});
+  if (i.callerDetail === undefined) i.callerDetail = [i.callerName, i.callerOther].filter(Boolean).join(', ');
+  if (i.foundDetail === undefined) i.foundDetail = i.foundOther || '';
+  delete i.callerName; delete i.callerOther; delete i.foundOther;
+  if (i.clientFirst === undefined) { i.clientFirst = ''; i.clientLast = ''; }
+  if (LEGACY.age[i.age]) {
+    const c = k.clientId && (db.clients || []).find((x) => x.id === k.clientId);
+    const fromDob = c && ageGroupFor(c.dob, new Date(k.startedAt));
+    i.age = fromDob && fromDob !== 'Child, 0–17' && fromDob !== 'Older adult, 60+' ? fromDob : LEGACY.age[i.age];
+  }
+  if (!k.reach) k.reach = blankReach();
+  if (!k.demo) k.demo = blankDemo();
+  if (k.identifiedIn === undefined) k.identifiedIn = k.clientId && (k.log || []).some((l) => /^Started from /.test(l.text)) ? 'profile' : k.clientId ? 'identify' : null;
 }
 function seedCloseout(db) {
   db.closeouts = [];
@@ -68,6 +86,8 @@ function full(db, k) {
   out.client = k.clientId ? summary(findClient(db, k.clientId)) : null;
   out.candidate = k.candidateId && !k.clientId ? summary(findClient(db, k.candidateId)) : null;
   out.possibleLinks = possibleLinks(db, k).map((x) => contactSummary(db, x));
+  const known = k.clientId || k.candidateId ? db.clients.find((x) => x.id === (k.clientId || k.candidateId)) : null;
+  out.known = known ? knownInfo(known, k.id) : null;
   return out;
 }
 
@@ -91,7 +111,8 @@ export function createContact(db, body = {}) {
     startedAt: new Date().toISOString(), endedAt: null, status: 'open', closedKind: null, staff: db.userId,
     clientId: null, identity: null, candidateId: null, possibleClientId: null, path: null, group: '', priorRefs: [], linkedPrior: null,
     anon: { name: '', zip: '', county: 'Allegheny', language: 'English' }, unverifiedName: '',
-    intake: { safety: null, caller: null, callerOther: '', callerName: '', age: null, story: '', reason: null, reasonText: '', coverage: null, coverageDetail: '', found: null, foundOther: '', privacy: null, callerConfirmed: null, coverageConfirmed: null },
+    intake: { safety: null, caller: null, callerDetail: '', clientFirst: '', clientLast: '', age: null, story: '', reason: null, reasonText: '', coverage: null, coverageDetail: '', found: null, foundDetail: '', privacy: null, callerConfirmed: null, coverageConfirmed: null },
+    reach: blankReach(), demo: blankDemo(), identifiedIn: null,
     screening: { mh: null, ph: null, house: null, food: null, su: null },
     needs: [], interactions: [], followUp: { ok: null, how: 'Phone call', time: '' }, onsite: { idCheck: null, consentSigned: '', docs: [] },
     notes: [], actions: [], links: [], urgent: null, correction: null, corrections: [], log: [], reminderId: null, createdAt: new Date().toISOString()
@@ -102,7 +123,8 @@ export function createContact(db, body = {}) {
     if (c.colabs.indexOf('ASC') < 0 && !c.ascDischarge) throw new BadRequest('This client is not enrolled in ASC.');
     const back = !!c.ascDischarge;
     enroll(c); // a discharged client who comes back is re-enrolled
-    Object.assign(k, { clientId: c.id, identity: 'matched', path: 'client' });
+    Object.assign(k, { clientId: c.id, identity: 'matched', path: 'client', identifiedIn: 'profile' });
+    k.intake.age = ageGroupFor(c.dob);
     appendLog(k, [{ key: 'identity', text: 'Started from ' + c.first + ' ' + c.last + '’s record' + (back ? ', re-enrolled in ASC' : '') }], db.userId);
     syncAscService(db, c);
   }
@@ -140,20 +162,20 @@ function syncFollowUps(db, k) {
   return { changed, removed };
 }
 
-const SECTIONS = ['intake', 'screening', 'followUp', 'onsite', 'anon'];
+const SECTIONS = ['intake', 'screening', 'followUp', 'onsite', 'anon', 'reach', 'demo'];
 const LISTS = ['needs', 'interactions', 'notes', 'actions'];
 
 // What can still change once a contact is closed: case notes and action items (and their links).
 const AFTER_CLOSE = ['notes', 'actions', 'addLinks', 'removeLinks'];
 // What a supervisor can correct on a closed contact. Who the contact is (identity, links) stays as closed.
-const CORRECTABLE = ['intake', 'screening', 'needs', 'interactions', 'followUp', 'onsite', 'anon', 'site', 'channel', 'dropIxLinks'];
+const CORRECTABLE = ['intake', 'screening', 'needs', 'interactions', 'followUp', 'onsite', 'anon', 'reach', 'demo', 'site', 'channel', 'dropIxLinks'];
 const text = (v, max) => String(v == null ? '' : v).slice(0, max);
 const cleanSection = (v) => {
   const out = {};
   Object.keys(v).slice(0, 60).forEach((key) => { const x = v[key]; out[key] = Array.isArray(x) ? x.slice(0, 40).map((y) => text(y, 200)) : typeof x === 'boolean' || x === null ? x : typeof x === 'number' ? x : text(x, 4000); });
   return out;
 };
-const cleanNeed = (n) => ({ id: text(n.id, 40), name: text(n.name, 120), urg: text(n.urg, 40), outcome: text(n.outcome, 120), outcomeNote: text(n.outcomeNote, 2000) });
+const cleanNeed = (n) => ({ id: text(n.id, 40), name: text(n.name, 120), urg: text(n.urg, 40), outcome: text(n.outcome, 120), outcomeNote: text(n.outcomeNote, 2000), outcomeAuto: n.outcomeAuto === true ? true : n.outcomeAuto === false ? false : null });
 // Minutes stay as typed, but no single interaction is recorded as longer than 10 hours.
 const cleanMin = (v) => { const t = text(v, 6).trim(); const m = Number(t); return t && m > 600 ? '600' : t; };
 // Who they were referred to: a snapshot from the provider directory, or a name typed in for someone not in it.
@@ -181,6 +203,8 @@ export function updateContact(db, id, patch = {}) {
   if (Array.isArray(patch.addLinks)) patch.addLinks.forEach((l) => { if (l && l.actionId && !k.links.some((x) => x.actionId === l.actionId)) k.links.push({ actionId: String(l.actionId), ixId: l.ixId ? String(l.ixId) : null, auto: null }); });
   if (Array.isArray(patch.removeLinks)) k.links = k.links.filter((l) => patch.removeLinks.indexOf(l.actionId) < 0 || l.auto);
   if (patch.dropIxLinks) k.links = k.links.filter((l) => l.ixId !== patch.dropIxLinks);
+  // Contact info a coordinator updates for a known client is kept on their record, as an ASC-reported address.
+  const recordChanged = patch.reach && k.clientId ? saveAscAddress(db, k) : null;
   if ('channel' in patch) k.channel = patch.channel === 'person' ? 'person' : 'phone';
   if ('site' in patch) k.site = String(patch.site || '');
   if ('path' in patch) k.path = patch.path === 'anon' || patch.path === 'client' ? patch.path : null;
@@ -214,7 +238,9 @@ export function updateContact(db, id, patch = {}) {
   if (k.clientId && (k.notes.length || k.actions.length)) { const m = moveToClient(db, k); moved.notes.push(...m.notes); moved.actions.push(...m.actions); }
   const sync = syncFollowUps(db, k);
   appendLog(k, lines, db.userId, { correction: !!k.correction });
-  return { contact: full(db, k), notes: moved.notes, actions: moved.actions.concat(sync.changed).map(clone), removeActions: sync.removed };
+  const out = { contact: full(db, k), notes: moved.notes, actions: moved.actions.concat(sync.changed).map(clone), removeActions: sync.removed };
+  if (recordChanged) out.client = fullRecord(recordChanged);
+  return out;
 }
 
 function findByRef(db, text) {
@@ -245,6 +271,52 @@ function moveToClient(db, k) {
   return moved;
 }
 
+// ------------------------------------------------------------------ contact info and demographics
+// What's on file for a client, as intake shows it before the coordinator changes anything: the latest contact
+// info ASC was given on an earlier contact, or else the address, phone and email on their record.
+const ASC_SOURCE = { bucket: 'OBH', name: 'DCS - Administrative Service Coordination', code: 'ASC' };
+const isAsc = (a) => (a.specificSources || []).some((x) => x.code === ASC_SOURCE.code) && /^asc-/.test(a.id);
+const isoToday = () => { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+function knownInfo(c, contactId) {
+  const asc = (c.addresses || []).filter((a) => isAsc(a) && a.id !== 'asc-' + contactId && !a.end).sort((a, b) => (a.start < b.start ? 1 : -1))[0];
+  const st = /\(([A-Z]{2})\)/.exec(asc ? asc.county : '');
+  const reach = asc
+    ? { street: asc.street === NO_STREET ? '' : asc.street, city: asc.city, state: st ? st[1] : 'PA', zip: asc.zip, phone: asc.phone ? asc.phone.number : '', email: asc.email || '' }
+    : { street: (c.address && c.address.street) || '', city: (c.address && c.address.city) || '', state: (c.address && c.address.state) || (c.address && c.address.street ? 'PA' : ''), zip: (c.address && c.address.zip) || '', phone: c.phone || '', email: c.email || '' };
+  const stamp = asc ? { source: 'ASC', asOf: asc.reports && asc.reports[0] ? asc.reports[0].date : asc.start } : (c.sources && c.sources.address) || { source: '', asOf: '' };
+  const demo = {};
+  DEMO_FIELDS.forEach(([key]) => { demo[key] = String(c[key] || ''); });
+  return { reach, demo, source: stamp.source || '', asOf: stamp.asOf || '' };
+}
+const NO_STREET = 'No street address given';
+// Saves the contact info from this contact on the client's record, as one address record reported to ASC (the
+// program the info came from). Earlier ASC-reported records are ended: this one replaces them. Changing it back to
+// what was on file removes it. Returns the client when their record changed.
+function saveAscAddress(db, k) {
+  const c = findClient(db, k.clientId);
+  const id = 'asc-' + k.id;
+  const known = knownInfo(c, k.id).reach;
+  const eff = {};
+  REACH_FIELDS.forEach(([key]) => { eff[key] = String(k.reach[key] != null ? k.reach[key] : known[key] || '').trim(); });
+  const changed = REACH_FIELDS.some(([key]) => eff[key] !== String(known[key] || '').trim());
+  const at = (c.addresses || []).findIndex((a) => a.id === id);
+  if (!changed) { if (at < 0) return null; c.addresses.splice(at, 1); return c; }
+  const today = isoToday();
+  const state = (eff.state || 'PA').toUpperCase().slice(0, 2);
+  const rec = {
+    id, street: eff.street || NO_STREET, city: eff.city, township: '', county: state === 'PA' ? 'Allegheny' : 'Out of state (' + state + ')', zip: eff.zip,
+    schoolDistrict: '', addressType: 'Reported', residential: !!eff.street, kind: 'home', useDescription: 'Given to ASC on ' + k.ref + (k.intake.caller && k.intake.caller !== 'The client' ? ', by the caller (' + k.intake.caller.toLowerCase() + ')' : ''),
+    start: today, effDate: today, end: null, sources: [ASC_SOURCE.bucket], specificSources: [{ ...ASC_SOURCE }],
+    reports: [{ agency: 'ASC – Allegheny County', date: today, method: k.channel === 'person' ? 'In person' : 'Phone call', county: 'Allegheny' }],
+    certainty: k.intake.caller && k.intake.caller !== 'The client' ? 'low' : 'medium', conflict: '', email: eff.email,
+    phone: eff.phone ? { number: eff.phone, type: 'Reported', validDate: today } : null, altPhones: [], providerLocation: '', facilityId: ''
+  };
+  if (!c.addresses) c.addresses = [];
+  c.addresses.forEach((a) => { if (isAsc(a) && a.id !== id && !a.end) a.end = today; });
+  if (at >= 0) c.addresses[at] = { ...rec, start: c.addresses[at].start, effDate: c.addresses[at].effDate }; else c.addresses.unshift(rec);
+  return c;
+}
+
 const MCI = (db) => 'R' + String(1100000000 + db.clients.length * 7919 + db.contactSeq).slice(-10);
 
 // Puts the contact on a client's record: an existing client (`clientId`) or one registered now (`newClient`).
@@ -273,19 +345,22 @@ export function linkContact(db, id, body = {}) {
     let cid = 'c' + num; while (db.clients.some((x) => x.id === cid)) cid += 'x';
     c = {
       id: cid, first: f.first.trim(), last: f.last.trim(), household: false, members: null, dob: f.dob, gender: f.gender, legalSex: f.gender,
-      race: f.race || '', ethnicity: f.ethnicity || '', marital: '', living: f.living || '', language: f.language || 'English',
-      mci: MCI(db), ssn4: String(f.ssn || '').replace(/\D/g, '').slice(-4), ssnFull: '', dhs: '', dpw: '', phone: f.phone || '', email: '',
+      race: f.race || '', ethnicity: f.ethnicity || '', marital: f.marital || '', living: f.living || '', language: f.language || 'English',
+      mci: MCI(db), ssn4: String(f.ssn || '').replace(/\D/g, '').slice(-4), ssnFull: '', dhs: '', dpw: '', phone: f.phone || '', email: f.email || '',
       address: { street: f.street || '', city: f.city || '', state: f.state || 'PA', zip: f.zip || '', school: '', ward: '', facility: null },
       colabs: [], starred: null, favorited: '', guardian: null, coverage: null, enrollments: [], services: [], instances: [], justice: null,
       sources: { address: { source: 'ASC', asOf: usOf(new Date()) }, phone: { source: 'ASC', asOf: usOf(new Date()) }, email: { source: '', asOf: '' } },
-      addresses: f.street ? [{ id: 'addr0', street: f.street, city: f.city || '', township: '', county: f.county || 'Allegheny', zip: f.zip || '', schoolDistrict: '', addressType: 'Permanent', residential: true, kind: 'home', useDescription: 'Residence', start: new Date().toISOString().slice(0, 10), effDate: '', end: null, sources: ['Self'], specificSources: [{ bucket: 'Self', name: 'ASC intake', code: 'ASC' }], reports: [{ agency: 'ASC', date: usOf(new Date()), method: 'Phone', county: f.county || 'Allegheny' }], certainty: 'medium', conflict: '', email: '', phone: null, altPhones: [], providerLocation: '', facilityId: '' }] : []
+      addresses: f.street ? [{ id: 'addr0', street: f.street, city: f.city || '', township: '', county: f.county || 'Allegheny', zip: f.zip || '', schoolDistrict: '', addressType: 'Permanent', residential: true, kind: 'home', useDescription: 'Residence', start: new Date().toISOString().slice(0, 10), effDate: '', end: null, sources: ['Self'], specificSources: [{ bucket: 'Self', name: 'ASC intake', code: 'ASC' }], reports: [{ agency: 'ASC', date: usOf(new Date()), method: 'Phone', county: f.county || 'Allegheny' }], certainty: 'medium', conflict: '', email: f.email || '', phone: f.phone ? { number: f.phone, type: 'Reported', validDate: isoToday() } : null, altPhones: [], providerLocation: '', facilityId: '' }] : []
     };
     db.clients.push(c);
     identity = 'new';
   } else throw new BadRequest('Choose a client or register a new one.');
 
   enroll(c);
-  Object.assign(k, { clientId: c.id, identity, path: 'client', candidateId: null, unverifiedName: '' });
+  Object.assign(k, { clientId: c.id, identity, path: 'client', candidateId: null, unverifiedName: '', identifiedIn: body.from === 'intake' ? 'intake' : 'identify' });
+  if (!k.intake.age) k.intake.age = ageGroupFor(c.dob);
+  // Contact info typed before they were found goes on their record. A new client's record was just made from it.
+  if (identity !== 'new' && REACH_FIELDS.some(([key]) => k.reach[key] != null)) saveAscAddress(db, k);
   // Earlier calls tied by the caller's reference number are theirs by definition.
   const earlier = { notes: [], actions: [] };
   if (k.group) db.contacts.forEach((x) => {

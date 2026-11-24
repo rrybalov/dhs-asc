@@ -59,7 +59,7 @@ export function href(r) {
 const listeners = new Set();
 export function navigate(to, opts) {
   const target = typeof to === 'string' ? to : href(to);
-  if (location.hash !== target) history.pushState(null, '', target);
+  if (location.hash !== target) history[opts && opts.replace ? 'replaceState' : 'pushState'](null, '', target);
   listeners.forEach((fn) => fn(opts || {}));
 }
 
