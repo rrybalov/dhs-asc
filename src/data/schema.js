@@ -170,8 +170,15 @@ export function normalizeNote(n) {
   return { id: str(n.id), clientId: str(n.clientId), date: str(n.date), edited: bool(n.edited), restricted: bool(n.restricted), tag: str(n.tag) || 'PERSONAL', author: str(n.author), text: str(n.text) };
 }
 /** @returns {ActionItem} */
+const STATUSES = ['open', 'progress', 'waiting', 'done', 'unreachable', 'cant'];
+// A call that didn't become a conversation, logged on the item it was for.
+export const normalizeAttempt = (t) => ({ id: str(t && t.id), at: str(t && t.at), by: str(t && t.by), result: str(t && t.result), note: str(t && t.note) });
 export function normalizeAction(a) {
-  return { id: str(a.id), clientId: str(a.clientId), tag: str(a.tag) || 'PERSONAL', text: str(a.text), assignee: str(a.assignee), due: str(a.due), done: bool(a.done), edited: bool(a.edited) };
+  const done = bool(a.done);
+  return {
+    id: str(a.id), clientId: str(a.clientId), tag: str(a.tag) || 'PERSONAL', text: str(a.text), assignee: str(a.assignee), due: str(a.due), done, edited: bool(a.edited),
+    status: STATUSES.indexOf(a.status) >= 0 ? a.status : done ? 'done' : 'open', attempts: Array.isArray(a.attempts) ? a.attempts.map(normalizeAttempt) : []
+  };
 }
 /** @returns {Provider} */
 export function normalizeProvider(p) {
@@ -182,8 +189,8 @@ export function normalizeProvider(p) {
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
 const strOrNull = (v) => (v == null || v === '' ? null : String(v));
 const strMap = (o, keys) => { const out = {}; keys.forEach((k) => { out[k] = k in o ? (o[k] == null ? null : String(o[k])) : null; }); return out; };
-const INTAKE_KEYS = ['safety', 'caller', 'callerDetail', 'clientFirst', 'clientLast', 'age', 'story', 'reason', 'reasonText', 'coverage', 'coverageDetail', 'found', 'foundDetail', 'privacy', 'callerConfirmed', 'coverageConfirmed'];
-const TEXT_KEYS = ['callerDetail', 'clientFirst', 'clientLast', 'story', 'reasonText', 'coverageDetail', 'foundDetail'];
+const INTAKE_KEYS = ['safety', 'caller', 'callerFirst', 'callerLast', 'callerRelation', 'callerPhone', 'callerDetail', 'consent', 'consentBy', 'consentAt', 'clientFirst', 'clientLast', 'age', 'story', 'reason', 'reasonText', 'coverage', 'coverageDetail', 'found', 'foundDetail', 'privacy', 'callerConfirmed', 'coverageConfirmed'];
+const TEXT_KEYS = ['callerFirst', 'callerLast', 'callerRelation', 'callerPhone', 'consentBy', 'consentAt', 'callerDetail', 'clientFirst', 'clientLast', 'story', 'reasonText', 'coverageDetail', 'foundDetail'];
 const REACH_KEYS = ['street', 'city', 'state', 'zip', 'phone', 'email'];
 const DEMO_KEYS = ['dob', 'gender', 'legalSex', 'race', 'ethnicity', 'language', 'marital', 'living'];
 // What's on file for the client, before this contact: shown in intake, where the coordinator can update it.
@@ -195,8 +202,8 @@ export function normalizeContactSummary(k) {
     id: str(k.id), ref: str(k.ref), channel: k.channel === 'person' ? 'person' : 'phone', site: str(k.site), startedAt: str(k.startedAt), endedAt: strOrNull(k.endedAt),
     status: k.status === 'closed' ? 'closed' : 'open', closedKind: strOrNull(k.closedKind), staff: str(k.staff), clientId: strOrNull(k.clientId),
     identity: strOrNull(k.identity), path: strOrNull(k.path), clientName: str(k.clientName), anonName: str(k.anonName),
-    needs: arr(k.needs).map((n) => ({ name: str(n.name), urg: str(n.urg) || 'Routine', outcome: str(n.outcome) })),
-    ixCount: num(k.ixCount), ixMin: num(k.ixMin), ixUnits: num(k.ixUnits)
+    needs: arr(k.needs).map((n) => ({ name: str(n.name), urg: str(n.urg) || 'Routine', outcome: str(n.outcome), resolvedAt: str(n.resolvedAt) })),
+    ixCount: num(k.ixCount), ixMin: num(k.ixMin), ixUnits: num(k.ixUnits), direction: k.direction === 'out' ? 'out' : 'in', purpose: str(k.purpose)
   };
 }
 
@@ -210,15 +217,19 @@ export function normalizeContact(k) {
     startedAt: str(k.startedAt), endedAt: strOrNull(k.endedAt), status: k.status === 'closed' ? 'closed' : 'open', closedKind: strOrNull(k.closedKind), staff: str(k.staff),
     clientId: strOrNull(k.clientId), identity: strOrNull(k.identity), candidateId: strOrNull(k.candidateId), path: strOrNull(k.path),
     group: str(k.group), priorRefs: arr(k.priorRefs).map(str), linkedPrior: strOrNull(k.linkedPrior), unverifiedName: str(k.unverifiedName),
-    anon: { name: str(a.name), zip: str(a.zip), county: str(a.county) || 'Allegheny', language: str(a.language) || 'English' },
+    unverifiedFirst: str(k.unverifiedFirst), unverifiedLast: str(k.unverifiedLast),
+    direction: k.direction === 'out' ? 'out' : 'in',
+    purpose: k.purpose ? { kind: str(k.purpose.kind), actionId: str(k.purpose.actionId), referralId: str(k.purpose.referralId), text: str(k.purpose.text) } : null,
+    anon: { name: str(a.name), last: str(a.last), zip: str(a.zip), county: str(a.county) || 'Allegheny', language: str(a.language) || 'English' },
     intake, screening: strMap(obj(k.screening), ['mh', 'ph', 'house', 'food', 'su']),
     reach: strMap(obj(k.reach), REACH_KEYS), demo: strMap(obj(k.demo), DEMO_KEYS), known: normalizeKnown(k.known), identifiedIn: strOrNull(k.identifiedIn),
-    needs: arr(k.needs).map((n, i) => ({ id: str(n.id) || 'n' + i, name: str(n.name), urg: str(n.urg) || 'Routine', outcome: str(n.outcome), outcomeNote: str(n.outcomeNote), outcomeAuto: n.outcomeAuto === true ? true : n.outcomeAuto === false ? false : null })),
-    interactions: arr(k.interactions).map((x, i) => ({ id: str(x.id) || 'i' + i, what: str(x.what), need: str(x.need), type: str(x.type), how: str(x.how), min: str(x.min), place: str(x.place), notes: str(x.notes), referral: normalizeIxReferral(x.referral) })),
+    needs: arr(k.needs).map((n, i) => ({ id: str(n.id) || 'n' + i, name: str(n.name), urg: str(n.urg) || 'Routine', outcome: str(n.outcome), outcomeNote: str(n.outcomeNote), outcomeAuto: n.outcomeAuto === true ? true : n.outcomeAuto === false ? false : null,
+      resolvedAt: str(n.resolvedAt), resolvedBy: str(n.resolvedBy), resolution: str(n.resolution), resolutionNote: str(n.resolutionNote) })),
+    interactions: arr(k.interactions).map((x, i) => ({ id: str(x.id) || 'i' + i, what: str(x.what), need: str(x.need), type: str(x.type), how: str(x.how), range: str(x.range), min: str(x.min), place: str(x.place), notes: str(x.notes), referral: normalizeIxReferral(x.referral) })),
     followUp: { ok: f.ok === 'Yes' || f.ok === 'No' ? f.ok : null, how: str(f.how) || 'Phone call', time: str(f.time) },
     onsite: { idCheck: strOrNull(o.idCheck), consentSigned: str(o.consentSigned), docs: arr(o.docs).map(str) },
     notes: arr(k.notes).map((n) => ({ id: str(n.id), text: str(n.text), restricted: bool(n.restricted), date: str(n.date), author: str(n.author), edited: bool(n.edited) })),
-    actions: arr(k.actions).map((x) => ({ id: str(x.id), text: str(x.text), assignee: str(x.assignee), due: str(x.due), done: bool(x.done), edited: bool(x.edited) })),
+    actions: arr(k.actions).map((x) => { const n = normalizeAction(x); delete n.clientId; delete n.tag; return n; }),
     links: arr(k.links).map((l) => ({ actionId: str(l.actionId), ixId: strOrNull(l.ixId), auto: strOrNull(l.auto) })),
     urgent: k.urgent ? { dest: str(k.urgent.dest), how: str(k.urgent.how), need: str(k.urgent.need), note: str(k.urgent.note), at: str(k.urgent.at) } : null,
     summarized: bool(k.summarized),
@@ -235,10 +246,10 @@ export function normalizeContact(k) {
 export function normalizeHistory(h) {
   h = obj(h);
   return {
-    openItems: arr(h.openItems).map((o) => ({ kind: str(o.kind), text: str(o.text), meta: str(o.meta), need: str(o.need), urg: str(o.urg), contactId: str(o.contactId), ref: str(o.ref), actionId: str(o.actionId), clientId: str(o.clientId) })),
+    openItems: arr(h.openItems).map((o) => ({ kind: str(o.kind), text: str(o.text), meta: str(o.meta), need: str(o.need), urg: str(o.urg), contactId: str(o.contactId), ref: str(o.ref), actionId: str(o.actionId), clientId: str(o.clientId), needId: str(o.needId), status: str(o.status) })),
     contacts: arr(h.contacts).map((x) => ({
       ...normalizeContactSummary(x), staffName: str(x.staffName), possible: bool(x.possible), minutes: num(x.minutes),
-      interactions: arr(x.interactions).map((i) => ({ id: str(i.id), what: str(i.what), type: str(i.type), how: str(i.how), min: str(i.min), place: str(i.place), referral: normalizeIxReferral(i.referral) })),
+      interactions: arr(x.interactions).map((i) => ({ id: str(i.id), what: str(i.what), type: str(i.type), how: str(i.how), range: str(i.range), min: str(i.min), place: str(i.place), referral: normalizeIxReferral(i.referral) })),
       notes: arr(x.notes).map(str), screening: arr(x.screening).map(str),
       record: x.record ? normalizeContact(x.record) : null
     }))
@@ -251,6 +262,25 @@ export const normalizeContactChange = (r) => ({
   contact: normalizeContact(r.contact), client: r.client ? normalizeClient(r.client) : null,
   notes: (r.notes || []).map(normalizeNote), actions: (r.actions || []).map(normalizeAction), removeActions: r.removeActions || []
 });
+
+// ------------------------------------------------------------------ ASC outreach
+// A referral from another program (CYF, HMIS, the jail, a hospital), waiting for ASC to reach the person.
+export const normalizeAscReferral = (r) => {
+  r = obj(r); const p = obj(r.person), f = obj(r.referrer);
+  return {
+    id: str(r.id), source: str(r.source), receivedAt: str(r.receivedAt), status: str(r.status) || 'new', assignee: str(r.assignee), assigneeName: str(r.assigneeName),
+    referrer: { name: str(f.name), role: str(f.role), phone: str(f.phone) }, reason: str(r.reason), needs: arr(r.needs).map(str),
+    clientId: str(r.clientId), enrolled: bool(r.enrolled), person: { first: str(p.first), last: str(p.last), dob: str(p.dob), phone: str(p.phone), zip: str(p.zip) },
+    statusNote: str(r.statusNote), contactIds: arr(r.contactIds).map(str), attempts: arr(r.attempts).map(normalizeAttempt),
+    log: arr(r.log).map((l) => ({ at: str(l.at), by: str(l.by), text: str(l.text) }))
+  };
+};
+// One row of a coordinator's Next Up list.
+export const normalizeNextUp = (x) => ({
+  key: str(x.key), kind: str(x.kind), rank: num(x.rank), why: str(x.why), text: str(x.text), due: str(x.due), attempts: num(x.attempts), lastAttempt: str(x.lastAttempt),
+  clientId: str(x.clientId), clientName: str(x.clientName), phone: str(x.phone), contactId: str(x.contactId), needId: str(x.needId), actionId: str(x.actionId), referralId: str(x.referralId), status: str(x.status)
+});
+export const normalizeAttemptResult = (r) => ({ referral: r && r.referral ? normalizeAscReferral(r.referral) : null, action: r && r.action ? normalizeAction(r.action) : null, contact: r && r.contact ? normalizeContact(r.contact) : null });
 
 // ------------------------------------------------------------------ ASC supervisor tools
 const normalizeTeamAction = (a) => ({ id: str(a.id), text: str(a.text), due: str(a.due), clientId: str(a.clientId), contactId: str(a.contactId), where: str(a.where) });

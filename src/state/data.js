@@ -130,8 +130,8 @@ export function useMutations() {
   }, [source, optimistic]);
 
   const toggleAction = useCallback((a) => optimistic({
-    apply: { actions: [{ id: a.id, done: !a.done }] },
-    revert: { actions: [{ id: a.id, done: a.done }] },
+    apply: { actions: [{ id: a.id, done: !a.done, status: a.done ? 'open' : 'done' }] },
+    revert: { actions: [{ id: a.id, done: a.done, status: a.status }] },
     call: () => source.updateAction(a.id, { done: !a.done }),
     confirm: (x) => ({ actions: [x] }),
     done: a.done ? 'Marked open' : 'Marked complete',
@@ -155,6 +155,16 @@ export function useMutations() {
     call: () => source.updateAction(a.id, fields),
     confirm: (x) => ({ actions: [x] }),
     done: 'Action item updated'
+  }), [source, optimistic]);
+
+  // ASC's statuses. Done, Unable to reach and Can't complete close the item, so it leaves open lists everywhere.
+  const setActionStatus = useCallback((a, status, label) => optimistic({
+    apply: { actions: [{ id: a.id, status, done: ['done', 'unreachable', 'cant'].indexOf(status) >= 0 }] },
+    revert: { actions: [{ id: a.id, status: a.status, done: a.done }] },
+    call: () => source.updateAction(a.id, { status }),
+    confirm: (x) => ({ actions: [x] }),
+    done: '“' + (a.text.length > 40 ? a.text.slice(0, 40) + '…' : a.text) + '” set to ' + label,
+    undo: () => setActionStatus({ ...a, status }, a.status || (a.done ? 'done' : 'open'), 'its earlier status')
   }), [source, optimistic]);
 
   const deleteAction = useCallback((a) => optimistic({
@@ -205,5 +215,5 @@ export function useMutations() {
   const submitReport = useCallback((body) => source.submitReport(body), [source]);
   const revealSsn = useCallback((id) => source.revealSsn(id), [source]);
 
-  return { setStar, toggleAction, createAction, updateAction, deleteAction, createNote, updateNote, deleteNote, submitReport, revealSsn, reset: api.reset, switchUser: api.switchUser };
+  return { setStar, toggleAction, setActionStatus, createAction, updateAction, deleteAction, createNote, updateNote, deleteNote, submitReport, revealSsn, reset: api.reset, switchUser: api.switchUser };
 }

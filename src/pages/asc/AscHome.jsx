@@ -10,6 +10,7 @@ import { plural, CHANNELS } from '../../data/asc.js';
 import { sortRows } from '../../lib.js';
 import { channelIcon, channelLabel, personLabel, StatusPill, whenText } from './parts.jsx';
 import { CloseoutsPage, TeamPage, ReportingPage } from './Supervisor.jsx';
+import { NextUpPage, ReferralsPage } from './Outreach.jsx';
 
 // Contact type and coordinator are their own columns, so they can be sorted and filtered.
 const COLS = [
@@ -49,11 +50,11 @@ function Row({ k }) {
   );
 }
 
-const SUBPAGES = { closeouts: CloseoutsPage, team: TeamPage, reporting: ReportingPage };
+const SUBPAGES = { next: NextUpPage, referrals: ReferralsPage, closeouts: CloseoutsPage, team: TeamPage, reporting: ReportingPage };
 
 export function AscHome({ route }) {
   const Sub = route && SUBPAGES[route.sub];
-  return Sub ? <Sub /> : <Contacts route={route || {}} />;
+  return Sub ? <Sub route={route} /> : <Contacts route={route || {}} />;
 }
 
 const VIEW_LIST = { 'in-progress': 'open', mine: 'mine', closed: 'closed', all: 'all' };

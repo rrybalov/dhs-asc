@@ -2,6 +2,55 @@
 
 Each version is kept on an `archive/` branch. See "Versions and rolling back" in the README.
 
+## v4.7: Outreach, statuses, referrals, minute ranges and consent
+
+From the team's review of v4.6.
+
+**Calls we make, not just calls we get.**
+- Contacts have a direction: *They reached us* or *We reached out*.
+- An action item, a referral or an open need can be called from wherever it shows: Next Up, Referrals, the client's ASC tab, and the history list. The client's ASC tab also has an **Outreach Call** button for a check-in.
+- The call dialog shows the number and earlier attempts. Then:
+  - **They Answered: Start Contact** opens an outreach contact about the item. Intake says what the call is about, asks "Who you're talking to" and skips "How they found us". The client is already linked, so Identify is skipped (a referral's person who isn't enrolled still goes through Identify).
+  - **No Answer: Log Attempt** logs the call on the item: no answer, voicemail, message with someone, wrong number, disconnected, text or email, with a note. No contact or event ID is created. An unanswered check-in becomes an action item due today, so the retry shows in Next Up.
+- Closing an outreach contact about an action item marks the item done.
+- Unable to reach is the coordinator's call: it's a status they set, not a count of attempts.
+
+**Next Up** (first in the ASC sidebar). One list per coordinator, most pressing first:
+1. urgent or crisis needs still open
+2. overdue items
+3. due today
+4. new referrals (theirs or unassigned)
+5. the rest by due date
+
+Within each group, people with more missed calls come later. Each row says why it's there and has Call and, for action items, a status. Supervisors can pick another coordinator.
+
+**Statuses on action items:** Open, In progress, Waiting on them, Done, Unable to reach, Can't complete. The last three close the item, so it counts as done everywhere else in CoLab.
+- In each interaction's reminders (the interaction panel), statuses change right there.
+- Also on Next Up, the Intake history summary, and the client's open items, which replace Mark Done.
+
+**Needs left open can be resolved later.** A need closed as *Still open* has **Mark Resolved** on the client's ASC tab and in the history. The resolution is recorded beside the need, and the outcome the contact closed with stays as it was.
+
+**Referrals from other programs** (ASC → Referrals).
+- Seven fictional referrals from CYF, HMIS, the jail and a hospital. **Simulate a Referral** shows one arriving, as an import from another system would.
+- Views: New, Contacted, Enrolled, Declined or Unreachable, All. Each row has the person, the reason, who referred them, attempts, a coordinator and a status.
+- Statuses: New → Contacted (once a call connects) → Enrolled (once the person is on an ASC record), or Declined or Unable to reach, set by hand. Each change is logged on the referral.
+
+**Intake.**
+- **Caller:** a caller who isn't the client gets first name, last name, relationship or agency, and callback number as separate fields, so they copy into another record cleanly. A notes line stays.
+- **Name-only and anonymous contacts** have first and last name fields too.
+- **Consent to share information:** a checkbox for the caller's or client's consent to share the client's information with the providers ASC refers them to, with who gave it and when. Without it:
+  - Find a Provider says not to share their details.
+  - Wrap Up flags it, more strongly if a referral was made.
+- **Earlier with ASC:** once the client is on the contact, Intake shows their enrollment, their last three contacts (needs, outcomes, where they were referred) and what's still open, with statuses and Mark Resolved.
+
+**Interaction time as a range:** Under 15 min, 15–30 min or 30–45 min, or Custom for exact minutes. Units are 15-minute increments, so the ranges are 1, 2 and 3 units, and custom minutes round up (50 minutes is 4 units). This replaces the earlier rounding to the nearest unit. A range counts at its low end when checking documented time against the length of the call.
+
+**Accessibility.**
+- Radio buttons sit in full-width label rows, which are the click target.
+- View tabs wrap at phone width.
+
+**Data.** Contacts gain `direction`, `purpose`, intake caller fields and consent, `anon.last`, `unverifiedFirst`/`unverifiedLast`, and `range` on interactions. Needs gain resolution fields. Action items gain `status` and `attempts`. New: ASC referrals, Next Up, attempts, resolving a need. Stored data is upgraded once (`ascModel` 6). See docs/API.md.
+
 ## v4.6: Intake asks who the client is; interactions start ready to fill in
 
 **Intake.**

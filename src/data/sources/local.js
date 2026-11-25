@@ -3,7 +3,7 @@
 import * as api from '../backend.js';
 import { buildSeed, enrich, SEED_VERSION } from '../seed.js';
 import { seedAsc } from '../asc-seed.js';
-import { normalizeSession, normalizeClient, normalizeClientSummary, normalizeNote, normalizeAction, normalizeProvider, normalizeContact, normalizeContactSummary, normalizeHistory, normalizeContactChange as contactChange, normalizeTeam, normalizeReassign, normalizeCloseout, normalizeDischarge, normalizeReport, normalizeReferral, normalizeDirectory } from '../schema.js';
+import { normalizeSession, normalizeClient, normalizeClientSummary, normalizeNote, normalizeAction, normalizeProvider, normalizeContact, normalizeContactSummary, normalizeHistory, normalizeContactChange as contactChange, normalizeTeam, normalizeReassign, normalizeCloseout, normalizeDischarge, normalizeReport, normalizeReferral, normalizeDirectory, normalizeAscReferral, normalizeNextUp, normalizeAttemptResult } from '../schema.js';
 
 const KEY = 'colab.db';
 
@@ -108,6 +108,12 @@ export function createLocalSource() {
     getReferral: (id) => run((d) => api.getReferral(d, id)).then(normalizeReferral),
     setReferralStatus: (id, status) => run((d) => api.setReferralStatus(d, id, { status }), true).then(normalizeReferral),
     setReferralsStatus: (ids, status) => run((d) => api.setReferralsStatus(d, { ids, status }), true).then((l) => l.map(normalizeReferral)),
-    submitStateReport: (period) => run((d) => api.submitReport(d, period), true).then(normalizeReport)
+    submitStateReport: (period) => run((d) => api.submitReport(d, period), true).then(normalizeReport),
+    listAscReferrals: () => run((d) => api.listAscReferrals(d), true).then((l) => l.map(normalizeAscReferral)),
+    updateAscReferral: (id, body) => run((d) => api.updateAscReferral(d, id, body), true).then(normalizeAscReferral),
+    simulateAscReferral: () => run((d) => api.simulateAscReferral(d), true).then(normalizeAscReferral),
+    logAttempt: (body) => run((d) => api.addAttempt(d, body), true).then(normalizeAttemptResult),
+    resolveNeed: (contactId, body) => run((d) => api.resolveNeed(d, contactId, body), true).then(contactChange),
+    getNextUp: (q) => run((d) => api.nextUp(d, q || {}), true).then((l) => l.map(normalizeNextUp))
   };
 }

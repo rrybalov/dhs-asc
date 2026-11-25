@@ -65,7 +65,7 @@ function Search({ k, edit, onNew, onUnverified }) {
               <p><strong>No match in MCI.</strong></p>
               <div className="asc-inline-row is-end">
                 {form.last && (form.first || form.dob || form.zip || form.ssn) && <button type="button" className="btn-text" onClick={lastOnly}>Search Last Name Only</button>}
-                <button type="button" className="btn-outline" onClick={() => onUnverified([form.first, form.last].filter(Boolean).join(' '))}>Save Name Only</button>
+                <button type="button" className="btn-outline" onClick={() => onUnverified(form)}>Save Name Only</button>
                 <button type="button" className="btn-primary" onClick={() => onNew(form)}>Register New Client</button>
               </div>
             </div>
@@ -221,7 +221,8 @@ function Anonymous({ k, edit, next }) {
         </div>
         <p className="asc-hint">Not in MCI. How to reach them and demographics, if they gave any, are on <Link className="link-btn is-inline" to={{ page: 'contact', id: k.id, step: 'intake' }}>Intake</Link>.</p>
         <div className="form-grid">
-          <Field id="a-name" label="What to call them" value={k.anon.name} onChange={set('name')} autoComplete="off" placeholder="First name or nickname" />
+          <Field id="a-name" label="First name or nickname" value={k.anon.name} onChange={set('name')} autoComplete="off" />
+          <Field id="a-last" label="Last name (optional)" value={k.anon.last} onChange={set('last')} autoComplete="off" />
           <div className="field"><label htmlFor="a-county">County</label><select className="select" id="a-county" value={k.anon.county} onChange={(e) => edit({ anon: { county: e.target.value } }, { now: true })}><option>Allegheny</option><option>Another county</option><option>Not sure</option></select></div>
         </div>
         <div className="asc-ref"><span>Their reference number</span><strong className="mono">{k.ref}</strong><span>“If you {k.channel === 'person' ? 'come back' : 'call back'}, give us this number.”</span></div>
@@ -239,8 +240,12 @@ export function IdentifyStep({ k, edit, next }) {
       {k.clientId ? <Identified k={k} edit={edit} next={next} />
         : k.identity === 'unverified' ? (
           <section className="asc-card is-warn" aria-labelledby="h-unv">
-            <h3 className="section-label" id="h-unv"><Icon name="alert" size={18} />Saved with name only: {k.unverifiedName || 'no name'}</h3>
+            <h3 className="section-label" id="h-unv"><Icon name="alert" size={18} />Saved with name only: {[k.unverifiedFirst, k.unverifiedLast].filter(Boolean).join(' ') || k.unverifiedName || 'no name'}</h3>
             <p>Not sent to the state until verified.</p>
+            <div className="form-grid is-2">
+              <Field id="u-first" label="First name" value={k.unverifiedFirst} onChange={(v) => edit({ unverifiedFirst: v })} autoComplete="off" />
+              <Field id="u-last" label="Last name" value={k.unverifiedLast} onChange={(v) => edit({ unverifiedLast: v })} autoComplete="off" />
+            </div>
             <div className="asc-inline-row"><button type="button" className="btn-outline" onClick={() => edit({ identity: null, path: 'client' }, { now: true })}>Search Again</button>
               {next && <button type="button" className="btn-primary is-icon" onClick={() => go(k, next[0])}>Next: {next[1]}<Icon name="arrowRight" /></button>}</div>
           </section>
@@ -254,9 +259,9 @@ export function IdentifyStep({ k, edit, next }) {
                       <h3 className="section-label" id="h-stay"><Icon name="user" size={18} />Stay anonymous</h3>
                       <p>Give information and resources. Nothing identifies them.</p>
                       <div className="asc-ref"><span>Their reference number</span><strong className="mono">{k.ref}</strong></div>
-                      <button type="button" className="btn-outline" onClick={() => edit(k.anon.name || !k.intake.clientFirst ? { path: 'anon' } : { path: 'anon', anon: { name: k.intake.clientFirst } }, { now: true })}>Stay Anonymous</button>
+                      <button type="button" className="btn-outline" onClick={() => edit(k.anon.name || !k.intake.clientFirst ? { path: 'anon' } : { path: 'anon', anon: { name: k.intake.clientFirst, last: k.anon.last || k.intake.clientLast } }, { now: true })}>Stay Anonymous</button>
                     </section>
-                    <Search k={k} edit={edit} onNew={setNewFrom} onUnverified={(name) => edit({ identity: 'unverified', unverifiedName: name }, { now: true })} />
+                    <Search k={k} edit={edit} onNew={setNewFrom} onUnverified={(f) => edit({ identity: 'unverified', unverifiedFirst: f.first.trim(), unverifiedLast: f.last.trim(), unverifiedName: [f.first.trim(), f.last.trim()].filter(Boolean).join(' ') }, { now: true })} />
                   </div>
                 </>
               )}

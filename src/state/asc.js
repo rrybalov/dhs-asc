@@ -52,7 +52,7 @@ export function combinePatches(older, newer) {
 
 export function useAscMutations() {
   const { source, dispatch, toast } = useApi();
-  const refreshLists = useCallback(() => { dispatch({ type: 'invalidate', prefix: 'contacts:' }); dispatch({ type: 'invalidate', prefix: 'history:' }); }, [dispatch]);
+  const refreshLists = useCallback(() => ['contacts:', 'history:', 'asc-next:', 'asc-referrals'].forEach((prefix) => dispatch({ type: 'invalidate', prefix })), [dispatch]);
   const apply = useCallback((r) => {
     dispatch({ type: 'records', records: { contacts: [r.contact], clients: r.client ? [r.client] : undefined, notes: r.notes, actions: r.actions, removeActions: r.removeActions } });
     refreshLists();
@@ -60,7 +60,7 @@ export function useAscMutations() {
   }, [dispatch, refreshLists]);
   const fail = useCallback((e) => { toast((e && e.message ? e.message + ' ' : '') + 'Your change was not saved.', { error: true }); throw e; }, [toast]);
 
-  const createContact = useCallback((body) => source.createContact(body).then((k) => { dispatch({ type: 'records', records: { contacts: [k] } }); refreshLists(); if (body.clientId) dispatch({ type: 'invalidate', prefix: 'client:' + body.clientId }); return k; }, fail), [source, dispatch, refreshLists, fail]);
+  const createContact = useCallback((body) => source.createContact(body).then((k) => { dispatch({ type: 'records', records: { contacts: [k] } }); refreshLists(); if (body.clientId) dispatch({ type: 'invalidate', prefix: 'client:' + body.clientId }); if (body.actionId) ['actions:', 'myActions'].forEach((prefix) => dispatch({ type: 'invalidate', prefix })); return k; }, fail), [source, dispatch, refreshLists, fail]);
   // Shows the change at once; the server's answer (which can add follow-ups) replaces it. A failure rolls back.
   // `kept`: the caller keeps the change on screen to send again, so a dropped connection isn't announced as lost.
   const updateContact = useCallback((k, patch, opts = {}) => {
@@ -182,4 +182,35 @@ export function useProviderDirectory(enabled = true) {
   const { source } = useApi();
   const query = useQuery(enabled ? 'provider-directory' : null, () => source.getProviderDirectory().then((data) => ({ data })));
   return { query, directory: query.data || null };
+}
+
+// ------------------------------------------------------------------ outreach: next up, referrals, call attempts
+export function useNextUp(staff) {
+  const { source } = useApi();
+  const q = staff ? { staff } : {};
+  const query = useQuery('asc-next:' + JSON.stringify(q), () => source.getNextUp(q).then((data) => ({ data })));
+  return { query, items: query.data || [] };
+}
+export function useAscReferrals() {
+  const { source } = useApi();
+  const query = useQuery('asc-referrals', () => source.listAscReferrals().then((data) => ({ data })));
+  return { query, referrals: query.data || [] };
+}
+export function useOutreachMutations() {
+  const { source, dispatch, toast } = useApi();
+  const refresh = useCallback(() => ['asc-next:', 'asc-referrals', 'history:', 'contacts:', 'actions:', 'myActions'].forEach((prefix) => dispatch({ type: 'invalidate', prefix })), [dispatch]);
+  const fail = useCallback((e) => { toast((e && e.message ? e.message + ' ' : '') + 'Nothing was changed.', { error: true }); throw e; }, [toast]);
+  return {
+    // A call that didn't become a conversation, on the action item or referral it was for.
+    logAttempt: useCallback((body) => source.logAttempt(body).then((r) => {
+      dispatch({ type: 'records', records: { actions: r.action ? [r.action] : undefined, contacts: r.contact ? [r.contact] : undefined } });
+      refresh(); toast('Call attempt logged: ' + body.result.toLowerCase()); return r;
+    }, fail), [source, dispatch, refresh, toast, fail]),
+    updateReferral: useCallback((id, body, done) => source.updateAscReferral(id, body).then((r) => { refresh(); if (done) toast(done); return r; }, fail), [source, refresh, toast, fail]),
+    simulateReferral: useCallback(() => source.simulateAscReferral().then((r) => { refresh(); toast('New referral from ' + r.source + ': ' + r.person.first + ' ' + r.person.last); return r; }, fail), [source, refresh, toast, fail]),
+    resolveNeed: useCallback((contactId, body) => source.resolveNeed(contactId, body).then((r) => {
+      dispatch({ type: 'records', records: { contacts: [r.contact] } });
+      refresh(); toast(body.need + ' marked resolved: ' + body.outcome.toLowerCase()); return r;
+    }, fail), [source, dispatch, refresh, toast, fail])
+  };
 }

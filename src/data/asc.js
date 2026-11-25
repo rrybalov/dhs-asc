@@ -3,6 +3,24 @@
 // units, follow-up dates and what the state report needs.
 
 export const CHANNELS = { phone: 'Phone call', person: 'In person' };
+// Who started the conversation. Outreach is a call the coordinator makes: a follow-up, a referral, a check-in.
+export const DIRECTIONS = { in: 'They reached us', out: 'We reached out' };
+
+// Action item statuses. The last three close the item (it counts as done everywhere else in CoLab).
+export const ACTION_STATUS = { open: 'Open', progress: 'In progress', waiting: 'Waiting on them', done: 'Done', unreachable: 'Unable to reach', cant: 'Can’t complete' };
+export const CLOSED_STATUS = ['done', 'unreachable', 'cant'];
+export const statusOf = (a) => (a.status && ACTION_STATUS[a.status] ? a.status : a.done ? 'done' : 'open');
+// What happened on a call that didn't turn into a conversation. Logged on the item it was for.
+export const ATTEMPT_RESULTS = ['No answer', 'Left a voicemail', 'Left a message with someone', 'Wrong number', 'Number disconnected', 'Sent a text', 'Sent an email'];
+
+// Referrals from other programs, waiting for ASC to reach out.
+export const REFERRAL_STATUS = { new: 'New', contacted: 'Contacted', enrolled: 'Enrolled', declined: 'Declined', unreachable: 'Unable to reach' };
+export const REFERRAL_SOURCES = { CYF: 'Children, Youth and Families', HMIS: 'Homeless Management Information System', JAIL: 'Allegheny County Jail reentry', HOSP: 'Hospital discharge', IPV: 'IPV case conference' };
+
+// Interaction time, picked as a range. Units are 15-minute increments, so each range is a whole number of units;
+// "Custom" takes exact minutes and rounds up to the next increment.
+export const MIN_RANGES = { lt15: { label: 'Under 15 min', short: '<15 min', min: 15, low: 1, units: 1 }, '15-30': { label: '15–30 min', short: '15–30 min', min: 30, low: 15, units: 2 }, '30-45': { label: '30–45 min', short: '30–45 min', min: 45, low: 30, units: 3 } };
+export const minutesText = (x) => (MIN_RANGES[x.range] ? MIN_RANGES[x.range].short : Number(x.min) > 0 ? x.min + ' min' : '');
 // The role that can correct a closed contact.
 export const SUPERVISOR = 'ASC Supervisor';
 
@@ -18,6 +36,12 @@ export const CALLER_DETAIL = {
   'School, CYF, hospital or jail': { label: 'Their name, where they work and callback number', placeholder: 'For example: Ms. Park, counselor at Allderdice' },
   Other: { label: 'Who is calling?', placeholder: 'For example: neighbor, pastor, landlord' }
 };
+// Callers other than the client: who they are, for copying into a record field by field.
+export const CALLER_RELATION = {
+  'Parent or guardian': 'Relationship', 'Other family': 'Relationship', 'Provider for their client': 'Agency and role',
+  'School, CYF, hospital or jail': 'Where they work and role', Other: 'Who they are to the client'
+};
+export const callerName = (i) => [i.callerFirst, i.callerLast].filter(Boolean).join(' ');
 // Age groups don't overlap. Transition-age youth (18–25) is its own group because many services are set up for it.
 export const AGES = ['Child, 0–17', 'Transition-age youth, 18–25', 'Adult, 26–59', 'Older adult, 60+', 'Not sure'];
 export const CHILD = AGES[0];
@@ -184,7 +208,7 @@ export function followUpPlan(contact, firstName) {
 }
 
 // ------------------------------------------------------------------ interactions and reporting
-export const unitsFor = (min) => { const m = Number(min); return m > 0 ? Math.max(1, Math.round(m / 15)) : 0; };
+export const unitsFor = (min) => { const m = Number(min); return m > 0 ? Math.ceil(m / 15) : 0; };
 export function missingFor(ix) {
   const m = [];
   if (!String(ix.what || '').trim()) m.push('what was given');
@@ -205,7 +229,8 @@ export const totalsText = (t) => plural(t.count, 'interaction', 'interactions') 
 // a coordinator can document work done after the call ended, but a typo like 300 for 30 should be caught.
 export function overtime(contact, now) {
   const length = minutesBetween(contact.startedAt, contact.endedAt || now || new Date().toISOString());
-  const documented = totals(contact.interactions).min;
+  // A range counts at its low end here, so picking "15–30" for a 20-minute call isn't flagged.
+  const documented = contact.interactions.reduce((s, x) => s + (MIN_RANGES[x.range] ? MIN_RANGES[x.range].low : Number(x.min) > 0 ? Number(x.min) : 0), 0);
   return documented > length + 5 ? { documented, length } : null;
 }
 
@@ -229,7 +254,7 @@ export function stepState(contact) {
   const i = contact.intake;
   const screened = SCREENING.filter((q) => contact.screening[q.key]).length;
   return {
-    intake: !!i.safety && contact.needs.length > 0 && screened === SCREENING.length && !!i.coverage && !!i.found,
+    intake: !!i.safety && contact.needs.length > 0 && screened === SCREENING.length && !!i.coverage && (!!i.found || contact.direction === 'out'),
     identify: contact.path === 'anon' || !!contact.clientId || contact.identity === 'unverified',
     interactions: contact.interactions.length > 0 && !totals(contact.interactions).incomplete,
     'wrap-up': contact.status === 'closed'
@@ -242,7 +267,7 @@ export function intakeGaps(contact) {
   if (screened < SCREENING.length) gaps.push('screening (' + screened + ' of ' + SCREENING.length + ')');
   if (!contact.needs.length) gaps.push('needs');
   if (!i.coverage) gaps.push('coverage');
-  if (!i.found) gaps.push('how they found us');
+  if (!i.found && contact.direction !== 'out') gaps.push('how they found us');
   return gaps;
 }
 export function screeningLine(screening) {
@@ -287,7 +312,10 @@ export function summaryNote(k, staffName) {
   const lines = [];
   lines.push('ASC ' + lower(CHANNELS[k.channel] || CHANNELS.phone) + ' summary, ' + usDate(k.startedAt) + ', ' + clockTime(k.startedAt) + '–' + clockTime(end) + ' (' + minutesBetween(k.startedAt, end) + ' min), ' + staffName + '.');
   const i = k.intake;
-  if (i.caller) lines.push('Caller: ' + lower(i.caller) + (i.callerDetail ? ' (' + i.callerDetail.trim() + ')' : '') + '.');
+  if (k.direction === 'out') lines.push('Outreach call' + (k.purpose && k.purpose.text ? ': ' + k.purpose.text.trim() : '') + '.');
+  const who = [callerName(i), i.callerRelation, i.callerPhone].filter(Boolean).join(', ');
+  if (i.caller) lines.push((k.direction === 'out' ? 'Spoke with: ' : 'Caller: ') + lower(i.caller) + (who ? ' (' + who + ')' : '') + '.' + (i.callerDetail ? ' ' + i.callerDetail.trim() : ''));
+  lines.push(i.consent === 'Yes' ? 'Consent to share information: given by ' + (i.consentBy === 'Caller' && i.caller !== 'The client' ? 'the caller' : 'the client') + '.' : 'Consent to share information: not captured.');
   const given = [i.clientFirst, i.clientLast].filter(Boolean).join(' ');
   if (!k.clientId && given) lines.push('Client, as given: ' + given + '.');
   if (i.age) lines.push('Age group: ' + lower(i.age) + '.');
@@ -299,7 +327,7 @@ export function summaryNote(k, staffName) {
   const concerns = SCREENING.filter((q) => isConcern(q, k.screening[q.key])).map((q) => lower(q.short));
   lines.push('Screening: ' + (!asked.length ? 'not asked.' : (concerns.length ? 'concerns with ' + concerns.join(', ') : 'no concerns') + ' (' + asked.length + ' of ' + SCREENING.length + ' asked).'));
   k.needs.forEach((n) => lines.push('Need: ' + n.name + ' (' + lower(n.urg || 'Routine') + '). Outcome: ' + lower(n.outcome || 'none chosen') + '.'));
-  k.interactions.filter((x) => x.what).forEach((x) => lines.push('Interaction: ' + x.what + '. ' + [plain(x.type), lower(x.how), x.min ? x.min + ' min' : ''].filter(Boolean).join(', ') + '.' + (x.referral && x.referral.name ? ' Referred to ' + x.referral.name + (x.referral.site && x.referral.site !== x.referral.name ? ', ' + x.referral.site : '') + (x.referral.phone ? ' (' + x.referral.phone + ')' : '') + '.' : '') + (x.notes ? ' ' + x.notes.trim() : '')));
+  k.interactions.filter((x) => x.what).forEach((x) => lines.push('Interaction: ' + x.what + '. ' + [plain(x.type), lower(x.how), minutesText(x), unitsFor(x.min) ? plural(unitsFor(x.min), 'unit', 'units') : ''].filter(Boolean).join(', ') + '.' + (x.referral && x.referral.name ? ' Referred to ' + x.referral.name + (x.referral.site && x.referral.site !== x.referral.name ? ', ' + x.referral.site : '') + (x.referral.phone ? ' (' + x.referral.phone + ')' : '') + '.' : '') + (x.notes ? ' ' + x.notes.trim() : '')));
   if (k.clientId) {
     if (k.followUp.ok === 'Yes') { const p = followUpPlan(k, ''); lines.push('Follow-up: OK by ' + lower(k.followUp.how) + '. 7-day on ' + usDate(p[0].due) + ', 90-day on ' + usDate(p[1].due) + '.'); }
     else lines.push(k.followUp.ok === 'No' ? 'Follow-up: declined.' : 'Follow-up: not asked.');

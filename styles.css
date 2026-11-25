@@ -1333,3 +1333,84 @@ span.ipv-risk + span.ipv-risk { margin-top: 2px; }
 .asc-ix.is-draft { border-left-color: var(--outline); border-style: dashed; border-left-style: solid; }
 .asc-pr-miles { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: var(--dark-blue); color: var(--white); font-size: 12px; font-weight: 500; vertical-align: 1px; }
 .asc-suggested { color: var(--slate); }
+
+/* ---------- v4.7: outreach, statuses, referrals, minute ranges, consent ---------- */
+.field-label-text { font-size: 12px; font-weight: 600; color: var(--slate); }
+.select.is-small, .asc-status-pick.is-small .select { min-height: 34px; padding-top: 4px; padding-bottom: 4px; font-size: 13px; }
+.asc-status-pick { display: inline-flex; flex: 0 0 auto; }
+.asc-status-pick .select { border-left-width: 4px; }
+.asc-status-pick.is-open .select, .asc-status-pick.is-new .select { border-left-color: var(--outline); }
+.asc-status-pick.is-progress .select, .asc-status-pick.is-contacted .select { border-left-color: var(--blue); }
+.asc-status-pick.is-waiting .select { border-left-color: #9A6A1F; }
+.asc-status-pick.is-done .select, .asc-status-pick.is-enrolled .select { border-left-color: var(--green-text); }
+.asc-status-pick.is-unreachable .select, .asc-status-pick.is-cant .select, .asc-status-pick.is-declined .select { border-left-color: var(--red-text); }
+.asc-rem-list li { align-items: center; flex-wrap: wrap; }
+.asc-rem-list li > span:not(.asc-status-pick) { flex: 1 1 200px; min-width: 0; }
+.asc-rem-list li small { display: block; color: var(--stone); text-decoration: none; }
+.asc-rem-list li.is-done { text-decoration: none; }
+.asc-rem-list li.is-done strong { text-decoration: line-through; color: var(--stone); }
+.asc-ix-time { grid-column: span 2; }
+.asc-ix-time .asc-min-row { flex-wrap: wrap; }
+.asc-min-custom { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.asc-min-custom label { font-size: 12px; font-weight: 600; color: var(--slate); }
+.asc-min-custom .input { width: 110px; }
+@media (max-width: 760px) { .asc-ix-time { grid-column: 1 / -1; } }
+.asc-caller-fields { display: flex; flex-direction: column; gap: 12px; }
+.asc-caller-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 900px) { .asc-caller-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .asc-caller-grid { grid-template-columns: minmax(0, 1fr); } }
+.asc-consent { font-weight: 600; color: var(--black); }
+.asc-consent-by { display: flex; flex-direction: column; gap: 6px; }
+.asc-outreach { margin-bottom: 4px; }
+/* A client's ASC history at a glance */
+.asc-glance { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding: 14px 16px; border: 1px solid var(--ash); border-radius: var(--radius-lg); background: var(--white); }
+.asc-glance.is-open-only { margin: 0 0 24px; }
+.asc-glance-line { margin: 0; font-size: 13px; color: var(--slate); }
+.asc-glance-contacts, .asc-glance-open { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.asc-glance-contacts li { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 2px 12px; font-size: 13px; color: var(--black); padding: 6px 0; border-top: 1px solid var(--hairline); }
+.asc-glance-contacts li small { grid-column: 2; color: var(--stone); }
+.asc-glance-date { color: var(--slate); font-weight: 600; }
+.asc-glance-open li { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; padding: 8px 10px; border-radius: var(--radius); background: var(--smoke); font-size: 13px; }
+.asc-glance-open li > span:first-child { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 8px; flex: 1 1 240px; min-width: 0; color: var(--black); }
+.asc-glance-open li > span:first-child .icon { color: var(--blue); margin-top: 2px; grid-row: span 2; }
+.asc-glance-open small { color: var(--stone); }
+.asc-glance-acts, .asc-resolve { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 480px) { .asc-glance-contacts li { grid-template-columns: minmax(0, 1fr); } .asc-glance-contacts li small { grid-column: 1; } }
+/* Calling someone */
+.asc-call { display: flex; flex-direction: column; gap: 14px; }
+.asc-call-why { margin: 0; color: var(--black); }
+.asc-call-phone { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 20px; font-weight: 600; color: var(--black); }
+.asc-call-phone .icon { color: var(--blue); }
+.asc-attempts { margin: 4px 0 0; padding-left: 18px; font-size: 13px; color: var(--slate); }
+.asc-call-btns { display: flex; gap: 10px; flex-wrap: wrap; }
+.asc-call-log { display: flex; flex-direction: column; gap: 12px; }
+.asc-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.asc-radio-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px; margin-top: 6px; }
+@media (max-width: 480px) { .asc-radio-list { grid-template-columns: minmax(0, 1fr); } }
+/* Next Up */
+.asc-next-how { margin: -4px 0 14px; }
+.asc-next-group + .asc-next-group { margin-top: 18px; }
+.asc-next-label { margin: 0 0 8px; font-size: 14px; font-weight: 700; color: var(--black); }
+.asc-next-label span { font-weight: 400; color: var(--stone); }
+.asc-next-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.asc-next { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--ash); border-left: 4px solid var(--outline); border-radius: var(--radius); background: var(--white); }
+.asc-next > .icon { color: var(--blue); align-self: start; margin-top: 2px; }
+.asc-next.is-need { border-left-color: var(--red-text); }
+.asc-next.is-need > .icon { color: var(--red-text); }
+.asc-next.is-referral { border-left-color: var(--blue); }
+.asc-next-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.asc-next-main strong { color: var(--black); font-weight: 600; }
+.asc-next-why { font-size: 12px; font-weight: 600; color: var(--slate); text-transform: uppercase; letter-spacing: .03em; }
+.asc-next-who { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; color: var(--slate); }
+.asc-next-tries { color: #8A5A12; font-size: 12px; }
+.asc-next-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 640px) { .asc-next { grid-template-columns: auto minmax(0, 1fr); } .asc-next-acts { grid-column: 2; justify-content: flex-start; } }
+/* Referrals */
+.asc-ref-row .td { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.asc-ref-row .td small { color: var(--stone); }
+.asc-ref-row .td small.asc-next-tries { color: #8A5A12; }
+.asc-ref-log { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: var(--slate); }
+.asc-ref-row .select { max-width: 100%; }
+.card-head .select { max-width: 100%; }
+@media (max-width: 480px) { .view-seg { white-space: normal; text-align: center; min-width: 0; } }
+.asc-ref-row .btn-outline.is-small { margin-top: 4px; }

@@ -10,10 +10,11 @@ import { navigate } from '../../router.jsx';
 import { isoToUS, todayISO } from '../../lib.js';
 import {
   IX_TYPES, PLACES, HOWS, PRESETS, FOLLOW_HOWS, needForScreen, howFor, defaultPlace, unitsFor, missingFor, totals, totalsText,
-  followUpPlan, weekday, usDate, minutesBetween, clockTime, shown, plural, effective
+  followUpPlan, weekday, usDate, minutesBetween, clockTime, shown, plural, effective, MIN_RANGES
 } from '../../data/asc.js';
 import { Options, Section, StepHeading, focusLater, removeWithUndo } from './parts.jsx';
 import { ProviderSearchModal } from './ProviderSearch.jsx';
+import { ActionStatus, attemptsText } from './Outreach.jsx';
 import { referralText } from '../../data/provider-search.js';
 import { useApi } from '../../state/store.jsx';
 
@@ -47,7 +48,13 @@ function Reminders({ k, x, reminders }) {
     <div className="asc-reminders">
       {reminders.length > 0 && (
         <ul className="asc-rem-list" aria-label={'Reminders for interaction ' + x.num}>
-          {reminders.map((a) => <li key={a.id} className={a.done ? 'is-done' : ''}><Icon name="bell" size={15} /><span><strong>{a.text}</strong> · Due {a.due ? weekday(a.due) + ' ' + isoToUS(a.due) : 'no date'}{a.done ? ' · Done' : ''}</span></li>)}
+          {reminders.map((a) => (
+            <li key={a.id} className={a.done ? 'is-done' : ''}>
+              <Icon name="bell" size={15} />
+              <span><strong>{a.text}</strong> · Due {a.due ? weekday(a.due) + ' ' + isoToUS(a.due) : 'no date'}{a.attempts && a.attempts.length ? <small>{attemptsText(a.attempts)}</small> : null}</span>
+              <ActionStatus a={a} id={base + '-st-' + a.id} k={k.clientId ? null : k} edit={k.clientId ? null : x.edit} small />
+            </li>
+          ))}
         </ul>
       )}
       {open ? (
@@ -104,13 +111,21 @@ function InteractionCard({ k, x, num, edit, save, needs, reminders, isNew, draft
           <select className="select" id={id('type')} value={x.type} onChange={(e) => set('type', true)(e.target.value)}>{IX_TYPES.map((v) => <option key={v} value={v}>{shown(v)}</option>)}</select></div>
         <div className="field"><label htmlFor={id('how')}>How</label>
           <select className="select" id={id('how')} value={x.how} onChange={(e) => set('how', true)(e.target.value)}>{HOWS.map((v) => <option key={v} value={v}>{shown(v)}</option>)}</select></div>
-        <div className="field"><div className="field-top"><label htmlFor={id('min')}>Minutes</label><span className="req">Required</span></div>
-          <div className="asc-min-row">
-            <input className="input" id={id('min')} type="number" min="1" inputMode="numeric" value={x.min} aria-invalid={!(Number(x.min) > 0) && k.status === 'closed'} aria-describedby={id('units')} onChange={(e) => set('min')(e.target.value)} />
-            <span className="asc-units" id={id('units')}>{units ? plural(units, 'unit', 'units') : '15 min = 1 unit'}</span>
-          </div></div>
         <div className="field"><div className="field-top"><label htmlFor={id('place')}>Place of service</label><span className="req">Required</span></div>
           <select className="select" id={id('place')} value={x.place} onChange={(e) => set('place', true)(e.target.value)}><option value="">Choose one</option>{PLACES.map((v) => <option key={v} value={v}>{shown(v)}</option>)}</select></div>
+        {/* Time as a range: each is a whole number of 15-minute units. Custom takes exact minutes. */}
+        <div className="field asc-ix-time"><div className="field-top"><span className="field-label-text" id={id('time')}>Time spent</span><span className="req">Required</span></div>
+          <div className="asc-min-row">
+            <Options small labelId={id('time')} value={x.range || (Number(x.min) > 0 ? 'custom' : null)} required
+              options={Object.keys(MIN_RANGES).map((r) => ({ value: r, label: MIN_RANGES[r].label })).concat([{ value: 'custom', label: 'Custom' }])}
+              onChange={(v) => { save({ ...x, range: v, min: MIN_RANGES[v] ? String(MIN_RANGES[v].min) : x.range === 'custom' ? x.min : '' }, true); if (v === 'custom') focusLater(id('min')); }} />
+            <span className="asc-units" id={id('units')} aria-live="polite">{units ? plural(units, 'unit', 'units') : '15 min = 1 unit'}</span>
+          </div>
+          {(x.range === 'custom' || (!x.range && Number(x.min) > 0)) && (
+            <div className="asc-min-custom"><label htmlFor={id('min')}>Minutes</label>
+              <input className="input" id={id('min')} type="number" min="1" inputMode="numeric" value={x.min} aria-invalid={!(Number(x.min) > 0) && k.status === 'closed'} aria-describedby={id('units')} onChange={(e) => save({ ...x, range: 'custom', min: e.target.value })} /></div>
+          )}
+        </div>
       </div>
       <div className="field asc-ix-ref">
         <div className="field-top"><label htmlFor={id('ref')}>Referred to</label><span className="asc-optional">Optional</span></div>
@@ -227,7 +242,7 @@ export function InteractionsStep({ k, edit, next }) {
         ) : <p className="asc-empty">No interactions.</p>}
         <datalist id="asc-presets">{presets.map((p) => <option key={p.label} value={p.label} />)}</datalist>
         {finder && (
-          <ProviderSearchModal need={finder.x.need} intakeAge={k.intake.age} coverage={k.intake.coverage} near={near}
+          <ProviderSearchModal need={finder.x.need} intakeAge={k.intake.age} coverage={k.intake.coverage} near={near} consent={k.intake.consent === 'Yes'}
             onPick={picked} onClose={() => setFinder(null)} />
         )}
       </Section>

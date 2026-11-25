@@ -9,9 +9,10 @@ import { useModalControls } from '../../state/modal.js';
 import { useContactHistory, useContact, useAscMutations } from '../../state/asc.js';
 import { navigate } from '../../router.jsx';
 import { newNeed } from './Intake.jsx';
-import { URGENT_DESTINATIONS, URGENT_HOWS, CRISIS, OPEN, usDate, clockTime, shown } from '../../data/asc.js';
+import { URGENT_DESTINATIONS, URGENT_HOWS, CRISIS, OPEN, usDate, clockTime, shown, minutesText } from '../../data/asc.js';
 import { channelIcon, channelLabel, Badge } from './parts.jsx';
 import { ContactRecord } from './Record.jsx';
+import { ActionStatus, CallButton, ResolveNeed } from './Outreach.jsx';
 
 const IX_SPEC = { grid: 'minmax(150px,2fr) minmax(130px,1.6fr) minmax(110px,1.2fr) minmax(100px,1fr) 64px minmax(90px,1fr)', min: 700 };
 const KIND = { 'Open need': 'is-need', 'Action item': 'is-action' };
@@ -47,7 +48,7 @@ function ContactEvent({ c, defaultOpen }) {
                     <div className="td" role="cell">{shown(x.what)}</div>
                     <div className="td" role="cell">{x.referral ? <>{x.referral.name}{x.referral.site && x.referral.site !== x.referral.name ? <small>{x.referral.site}</small> : null}{x.referral.phone ? <small>{x.referral.phone}</small> : null}</> : '—'}</div>
                     <div className="td" role="cell">{shown(x.type)}</div>
-                    <div className="td" role="cell">{shown(x.how)}</div><div className="td" role="cell">{x.min} min</div><div className="td" role="cell">{shown(x.place)}</div>
+                    <div className="td" role="cell">{shown(x.how)}</div><div className="td" role="cell">{minutesText(x) || '—'}</div><div className="td" role="cell">{shown(x.place)}</div>
                   </div>
                 ))}
               </Table>
@@ -69,7 +70,7 @@ function ContactEvent({ c, defaultOpen }) {
 }
 
 // One open item, with what can be done about it right here.
-function OpenItem({ o, current, onAddNeed }) {
+function OpenItem({ o, current, onAddNeed, client }) {
   const { actions } = useData();
   const { toggleAction } = useMutations();
   const { closeModal } = useModalControls();
@@ -82,12 +83,19 @@ function OpenItem({ o, current, onAddNeed }) {
     act = current && current.status === 'open'
       ? (here ? <span className="asc-open-done"><Icon name="checkSmall" size={14} />On this contact</span>
         : <button type="button" className="btn-outline is-small" onClick={() => onAddNeed(o)}><Icon name="plus" size={14} />Add to This Contact</button>)
-      : <button type="button" className="btn-text is-small" onClick={() => go({ page: 'contact', id: o.contactId, step: 'wrap-up' })}>View {o.ref}</button>;
+      : (
+        <span className="asc-open-acts">
+          {o.needId && <ResolveNeed x={o} idBase={'ho-' + o.contactId + '-' + o.needId} />}
+          <button type="button" className="btn-text is-small" onClick={() => go({ page: 'contact', id: o.contactId, step: 'wrap-up' })}>View {o.ref}</button>
+        </span>
+      );
   } else if (o.clientId) {
-    const a = actions[o.actionId];
+    // Status changes right here; from the client's record (not during a contact) the item can be called about too.
+    const a = actions[o.actionId] || { id: o.actionId, text: o.text, status: o.status || 'open', done: false, attempts: [] };
     act = (
       <span className="asc-open-acts">
-        {a && <button type="button" className="btn-outline is-small" disabled={done || a.done} onClick={() => toggleAction({ ...a, done: false }).then(() => setDone(true), () => {})}><Icon name="checkSmall" size={14} />{done || a.done ? 'Done' : 'Mark Done'}</button>}
+        <ActionStatus a={a} id={'ho-' + o.actionId} small />
+        {!current && client && <CallButton small item={{ kind: 'action', text: o.text, why: 'Action item', name: client.first + ' ' + client.last, phone: client.phone, clientId: o.clientId, actionId: o.actionId, attempts: a.attempts }} />}
         <button type="button" className="btn-text is-small" onClick={() => go({ page: 'client', id: o.clientId, sub: 'actions' })}>View All</button>
       </span>
     );
@@ -103,7 +111,7 @@ function OpenItem({ o, current, onAddNeed }) {
   );
 }
 
-export function HistoryList({ q, empty, current, onAddNeed }) {
+export function HistoryList({ q, empty, current, onAddNeed, client }) {
   const { query, history } = useContactHistory(q);
   return (
     <Loaded query={query} what="previous interactions">{() => (
@@ -111,7 +119,7 @@ export function HistoryList({ q, empty, current, onAddNeed }) {
         <section className="asc-open" aria-labelledby="h-still-open">
           <h3 className="section-label" id="h-still-open"><Icon name="alert" size={18} />Still open from earlier contacts</h3>
           {history.openItems.length ? (
-            <ul>{history.openItems.map((o, i) => <OpenItem key={(o.actionId || o.need) + i} o={o} current={current} onAddNeed={onAddNeed} />)}</ul>
+            <ul>{history.openItems.map((o, i) => <OpenItem key={(o.actionId || o.need) + i} o={o} current={current} onAddNeed={onAddNeed} client={client} />)}</ul>
           ) : <p className="asc-hint">Nothing open.</p>}
         </section>
         <section aria-labelledby="h-past">

@@ -1,6 +1,6 @@
 // Data source for a real CoLab API. Endpoints and payloads are documented in docs/API.md.
 // Every response passes through the normalizers in ../schema.js.
-import { normalizeSession, normalizeClient, normalizeClientSummary, normalizeNote, normalizeAction, normalizeProvider, normalizeContact, normalizeContactSummary, normalizeHistory, normalizeContactChange as contactChange, normalizeTeam, normalizeReassign, normalizeCloseout, normalizeDischarge, normalizeReport, normalizeReferral, normalizeDirectory } from '../schema.js';
+import { normalizeSession, normalizeClient, normalizeClientSummary, normalizeNote, normalizeAction, normalizeProvider, normalizeContact, normalizeContactSummary, normalizeHistory, normalizeContactChange as contactChange, normalizeTeam, normalizeReassign, normalizeCloseout, normalizeDischarge, normalizeReport, normalizeReferral, normalizeDirectory, normalizeAscReferral, normalizeNextUp, normalizeAttemptResult } from '../schema.js';
 
 export class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -76,6 +76,12 @@ export function createHttpSource({ baseUrl, headers = {}, credentials = 'same-or
     getReferral: (id) => request('GET', '/ipv/referrals/' + enc(id)).then(normalizeReferral),
     setReferralStatus: (id, status) => request('PUT', '/ipv/referrals/' + enc(id) + '/status', { status }).then(normalizeReferral),
     setReferralsStatus: (ids, status) => request('POST', '/ipv/referrals/status', { ids, status }).then((l) => l.map(normalizeReferral)),
-    submitStateReport: (period) => request('POST', '/asc/reports/' + enc(period) + '/submit', {}).then(normalizeReport)
+    submitStateReport: (period) => request('POST', '/asc/reports/' + enc(period) + '/submit', {}).then(normalizeReport),
+    listAscReferrals: () => request('GET', '/asc/referrals').then((l) => l.map(normalizeAscReferral)),
+    updateAscReferral: (id, body) => request('PATCH', '/asc/referrals/' + enc(id), body).then(normalizeAscReferral),
+    simulateAscReferral: () => request('POST', '/asc/referrals/simulate', {}).then(normalizeAscReferral),
+    logAttempt: (body) => request('POST', '/asc/attempts', body).then(normalizeAttemptResult),
+    resolveNeed: (contactId, body) => request('POST', '/asc/contacts/' + enc(contactId) + '/needs/resolve', body).then(contactChange),
+    getNextUp: (q = {}) => request('GET', '/asc/next-up' + (query(q) ? '?' + query(q) : '')).then((l) => l.map(normalizeNextUp))
   };
 }

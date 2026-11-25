@@ -62,7 +62,7 @@ function Result({ r, labels, pops, onPick, idx }) {
 
 // need/intakeAge seed the filters; needs (optional) lets the coordinator switch which need they're searching for.
 // near (a ZIP from intake) starts the list sorted by distance from where the person is.
-export function ProviderSearchModal({ need, intakeAge, coverage, needs, near, onPick, onClose }) {
+export function ProviderSearchModal({ need, intakeAge, coverage, needs, near, consent, onPick, onClose }) {
   const { query, directory: dir } = useProviderDirectory();
   const [forNeed, setForNeed] = useState(need || '');
   const [f, setF] = useState(() => ({ ...filtersFor(need, intakeAge), area: near || '' }));
@@ -119,6 +119,7 @@ export function ProviderSearchModal({ need, intakeAge, coverage, needs, near, on
             <label className="check-row asc-pr-county"><input type="checkbox" checked={f.inCounty} onChange={(e) => set('inCounty')(e.target.checked)} />Only sites in Allegheny County</label>
           </form>
           {NOT_COVERED[forNeed] && <p className="notice"><Icon name="info" size={16} /><span>{NOT_COVERED[forNeed]}</span></p>}
+          {consent === false && <p className="notice is-warn"><Icon name="shield" size={16} /><span><strong>No consent to share information.</strong> Give them the provider’s number; don’t share their details with the provider.</span></p>}
           {coverage === 'Medical Assistance or HealthChoices' && <p className="asc-hint is-icon"><Icon name="info" size={14} />They have Medical Assistance: check the provider is in Community Care’s network (Member Services 800-553-7499).</p>}
           <p className="asc-pr-count" id="pr-count" role="status">{results.length ? results.length + (results.length === 1 ? ' provider' : ' providers') + ', ' + sites + (sites === 1 ? ' site' : ' sites') + sortNote + '.' : 'No providers match. Try fewer filters, or turn off “Only sites in Allegheny County”.'}</p>
           {place && <p className="asc-hint">Distances are straight-line, from the middle of the ZIP or town. The trip will be longer.</p>}

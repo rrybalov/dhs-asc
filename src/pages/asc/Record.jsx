@@ -3,7 +3,7 @@
 import React from 'react';
 import { Icon } from '../../ui/icons.jsx';
 import { useSession } from '../../state/data.js';
-import { usDate, clockTime, minutesBetween, shown, CHANNELS, REACH_FIELDS, DEMO_FIELDS } from '../../data/asc.js';
+import { usDate, clockTime, minutesBetween, shown, CHANNELS, REACH_FIELDS, DEMO_FIELDS, callerName } from '../../data/asc.js';
 import { ScreeningSummary, Badge } from './parts.jsx';
 
 const IDENTITY = { matched: 'Matched in MCI and enrolled in ASC', new: 'Registered in MCI and enrolled in ASC', unverified: 'Name only, not verified' };
@@ -28,7 +28,7 @@ export function ContactRecord({ r }) {
   const end = r.endedAt;
   const p = (s) => 'rec-' + r.id + '-' + s;
   const who = r.clientId ? IDENTITY[r.identity] || IDENTITY.matched : r.identity === 'unverified' ? IDENTITY.unverified + (r.unverifiedName ? ': ' + r.unverifiedName : '')
-    : r.path === 'anon' ? 'Anonymous' + [r.anon.name, r.anon.zip].filter(Boolean).map((x, n) => (n ? ', ' : ': ') + x).join('') : 'Not identified';
+    : r.path === 'anon' ? 'Anonymous' + [[r.anon.name, r.anon.last].filter(Boolean).join(' '), r.anon.zip].filter(Boolean).map((x, n) => (n ? ', ' : ': ') + x).join('') : 'Not identified';
   const given = [i.clientFirst, i.clientLast].filter(Boolean).join(' ');
   // Only what was given or changed on this contact; what was already on file isn't repeated.
   const reach = REACH_FIELDS.filter(([key]) => r.reach[key]).map(([key, label]) => [label, r.reach[key]]);
@@ -37,7 +37,8 @@ export function ContactRecord({ r }) {
     <div className="asc-record">
       <Block id={p('contact')} title="Contact" icon="headset">
         <Pairs rows={[
-          ['Type', CHANNELS[r.channel] + (r.site ? ' at ' + r.site : '')],
+          ['Type', CHANNELS[r.channel] + (r.site ? ' at ' + r.site : '') + (r.direction === 'out' ? ', outreach' : '')],
+          r.purpose && ['Calling about', r.purpose.text],
           ['When', usDate(r.startedAt) + ', ' + clockTime(r.startedAt) + (end ? '–' + clockTime(end) + ' (' + minutesBetween(r.startedAt, end) + ' min)' : ', still open')],
           ['Coordinator', staffName(r.staff)],
           ['Who', who]
@@ -47,12 +48,14 @@ export function ContactRecord({ r }) {
         <Pairs rows={[
           ['Safety', i.safety === 'Yes' ? 'Yes, routed to crisis' : or(i.safety)],
           r.channel === 'person' && ['Where they talked', or(i.privacy)],
-          ['Caller', i.caller ? shown(i.caller) + (i.callerDetail ? ': ' + i.callerDetail : '') : '—'],
+          [r.direction === 'out' ? 'Talked with' : 'Caller', i.caller ? shown(i.caller) + ([callerName(i), i.callerRelation, i.callerPhone].some(Boolean) ? ': ' + [callerName(i), i.callerRelation, i.callerPhone].filter(Boolean).join(', ') : '') : '—'],
+          i.callerDetail && ['About the caller', i.callerDetail],
+          ['Consent to share information', i.consent === 'Yes' ? 'Captured' + (i.consentBy === 'Caller' && i.caller !== 'The client' ? ' from the caller' : ' from the client') + (i.consentAt ? ', ' + usDate(i.consentAt) : '') : 'Not captured'],
           given && ['Client, as given', given],
           ['Age group', or(i.age)],
           i.reason && ['Reason for calling', i.reason === 'Something else' ? or(i.reasonText) : shown(i.reason)],
           ['Coverage', i.coverage ? shown(i.coverage) + (i.coverageDetail ? ': ' + i.coverageDetail : '') : '—'],
-          ['How they found us', i.found ? shown(i.found) + (i.foundDetail ? ': ' + i.foundDetail : '') : '—']
+          r.direction !== 'out' && ['How they found us', i.found ? shown(i.found) + (i.foundDetail ? ': ' + i.foundDetail : '') : '—']
         ]} />
         {i.story && <blockquote className="asc-record-quote"><span className="field-label">In their words</span>{i.story}</blockquote>}
       </Block>

@@ -8,8 +8,9 @@ import { MissingModal, IssueModal } from './Reports.jsx';
 import { AddressModal } from '../pages/client/address/AddressModal.jsx';
 import { HistoryModal, UrgentModal } from '../pages/asc/History.jsx';
 import { CloseoutModal } from '../pages/asc/Closeout.jsx';
+import { CallModal } from '../pages/asc/Outreach.jsx';
 
-const DIALOGS = { search: SearchModal, missing: MissingModal, issue: IssueModal, address: AddressModal, ascHistory: HistoryModal, ascUrgent: UrgentModal, ascCloseout: CloseoutModal };
+const DIALOGS = { search: SearchModal, missing: MissingModal, issue: IssueModal, address: AddressModal, ascHistory: HistoryModal, ascUrgent: UrgentModal, ascCloseout: CloseoutModal, ascCall: CallModal };
 
 export function Modals() {
   const [modal] = usePref('modal', null);

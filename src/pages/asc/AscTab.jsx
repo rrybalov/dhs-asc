@@ -10,6 +10,7 @@ import { Loaded } from '../../ui/controls.jsx';
 import { ASC_ENROLLMENT } from '../../data/asc-seed.js';
 import { usDate, clientFlags, SUPERVISOR } from '../../data/asc.js';
 import { HistoryList } from './History.jsx';
+import { CallButton } from './Outreach.jsx';
 
 // The enrollment to show: the active one, or else the most recent.
 export function ascEnrollment(c) {
@@ -45,6 +46,7 @@ export function AscTab({ client: c }) {
       <div className="view-head">
         <h2 className="title"><Icon name="headset" size={24} />Administrative Service Coordination</h2>
         <div className="asc-start">
+          <CallButton label="Outreach Call" item={{ kind: 'other', text: 'Check-in call', why: '', name: c.first + ' ' + c.last, phone: c.phone, clientId: c.id }} />
           <button type="button" className="btn-outline" onClick={() => start('person')}><Icon name="door" />New In-Person Contact</button>
           <button type="button" className="btn-primary is-icon" onClick={() => start('phone')}><Icon name="phone" />New Phone Contact</button>
         </div>
@@ -92,7 +94,7 @@ export function AscTab({ client: c }) {
       }}</Loaded>
       <section aria-labelledby="h-asc-hist" className="asc-section">
         <h3 className="subtitle" id="h-asc-hist">History</h3>
-        <HistoryList q={{ clientId: c.id }} empty={'No ASC contacts for ' + c.first + ' yet.'} />
+        <HistoryList q={{ clientId: c.id }} client={c} empty={'No ASC contacts for ' + c.first + ' yet.'} />
       </section>
     </div>
   );

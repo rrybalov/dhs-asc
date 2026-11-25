@@ -63,6 +63,12 @@ const routes = [
   ['GET', /^\/ipv\/referrals\/([^/]+)$/, (m) => api.getReferral(db, m[1])],
   ['PUT', /^\/ipv\/referrals\/([^/]+)\/status$/, (m, q, body) => api.setReferralStatus(db, m[1], body)],
   ['POST', /^\/ipv\/referrals\/status$/, (m, q, body) => api.setReferralsStatus(db, body)],
+  ['GET', /^\/asc\/referrals$/, () => api.listAscReferrals(db)],
+  ['POST', /^\/asc\/referrals\/simulate$/, () => [201, api.simulateAscReferral(db)]],
+  ['PATCH', /^\/asc\/referrals\/([^/]+)$/, (m, q, body) => api.updateAscReferral(db, m[1], body)],
+  ['POST', /^\/asc\/attempts$/, (m, q, body) => [201, api.addAttempt(db, body)]],
+  ['POST', /^\/asc\/contacts\/([^/]+)\/needs\/resolve$/, (m, q, body) => api.resolveNeed(db, m[1], body)],
+  ['GET', /^\/asc\/next-up$/, (m, q) => api.nextUp(db, Object.fromEntries(q))],
   ['GET', /^\/asc\/reports\/(\d{4}-\d{2})$/, (m) => api.stateReport(db, m[1])],
   ['POST', /^\/asc\/reports\/(\d{4}-\d{2})\/submit$/, (m) => api.submitReport(db, m[1])],
   // Test helpers, not part of the API contract.

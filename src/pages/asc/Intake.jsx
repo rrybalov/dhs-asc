@@ -7,10 +7,11 @@ import { useAscMutations } from '../../state/asc.js';
 import { navigate } from '../../router.jsx';
 import {
   SAFETY, CALLERS, CALLER_DETAIL, AGES, COVERAGE, FOUND, FOUND_DETAIL, PRIVACY, URGENCY, NEED_OPTIONS, SCREENING, SITES,
-  REACH_FIELDS, DEMO_FIELDS, DEMO_OPTIONS, needForScreen, isConcern, usDate, ageGroupFor, effective, reachChanged, blankReach, stepsFor
+  REACH_FIELDS, DEMO_FIELDS, DEMO_OPTIONS, needForScreen, isConcern, usDate, clockTime, ageGroupFor, effective, reachChanged, blankReach, stepsFor, CALLER_RELATION, callerName
 } from '../../data/asc.js';
 import { Options, Section, StepHeading, initials, focusLater, removeWithUndo, useMountFocus } from './parts.jsx';
 import { PossibleLinks } from './Identify.jsx';
+import { AtAGlance } from './Outreach.jsx';
 import { useApi, usePref } from '../../state/store.jsx';
 import { dobText } from '../../lib.js';
 
@@ -188,6 +189,49 @@ function Reach({ k, edit }) {
   );
 }
 
+// Who the caller is, field by field so it copies cleanly into another record: name, relationship or agency, and a
+// callback number. The client calling for themselves only gets a notes line.
+function CallerFields({ i, set }) {
+  if (i.caller === 'The client') return <Detail id="asc-caller-detail" spec={CALLER_DETAIL[i.caller]} value={i.callerDetail} onChange={set('callerDetail')} />;
+  return (
+    <div className="asc-caller-fields">
+      <div className="form-grid asc-caller-grid">
+        <Field id="asc-caller-first" label="Caller’s first name" value={i.callerFirst} onChange={set('callerFirst')} autoComplete="off" />
+        <Field id="asc-caller-last" label="Caller’s last name" value={i.callerLast} onChange={set('callerLast')} autoComplete="off" />
+        <Field id="asc-caller-rel" label={CALLER_RELATION[i.caller] || 'Relationship'} value={i.callerRelation} onChange={set('callerRelation')} autoComplete="off" />
+        <Field id="asc-caller-phone" label="Callback number" type="tel" value={i.callerPhone} onChange={set('callerPhone')} autoComplete="off" />
+      </div>
+      <div className="form-grid is-2 asc-detail"><Field id="asc-caller-detail" label="Notes about the caller (optional)" value={i.callerDetail} onChange={set('callerDetail')} placeholder={(CALLER_DETAIL[i.caller] || {}).placeholder} autoComplete="off" wide /></div>
+    </div>
+  );
+}
+
+// Consent from the caller or client to share the client's information with the providers and programs ASC
+// refers them to. Captured with who gave it; when it's missing, referrals are flagged.
+function Consent({ k, edit }) {
+  const i = k.intake;
+  const caller = i.caller && i.caller !== 'The client';
+  const on = i.consent === 'Yes';
+  const by = i.consentBy || (caller ? 'Caller' : 'Client');
+  return (
+    <Section id="h-consent" title="Consent to share information" icon="shield"
+      hint="They agree that ASC can share the client’s information with the providers and programs we refer them to.">
+      <label className="check-row asc-consent">
+        <input type="checkbox" id="asc-consent" checked={on} onChange={(e) => edit({ intake: e.target.checked ? { consent: 'Yes', consentBy: by } : { consent: null, consentBy: '' } }, { now: true })} />
+        Consent captured
+      </label>
+      {on && caller && (
+        <div className="asc-consent-by">
+          <p className="field-label" id="h-consent-by">Given by</p>
+          <Options small required labelId="h-consent-by" value={by} options={[{ value: 'Client', label: 'The client' }, { value: 'Caller', label: 'The caller' + (callerName(i) ? ', ' + callerName(i) : '') }]} onChange={(v) => edit({ intake: { consentBy: v } }, { now: true })} />
+        </div>
+      )}
+      {on && i.consentAt && <p className="asc-hint">Captured {usDate(i.consentAt)} at {clockTime(i.consentAt)}.</p>}
+      {!on && <p className="asc-hint is-icon"><Icon name="info" size={14} />Without it, give them a provider’s number but don’t share their details.</p>}
+    </Section>
+  );
+}
+
 // The detail box under whichever answer is chosen.
 function Detail({ id, spec, value, onChange }) {
   if (!spec) return null;
@@ -298,17 +342,24 @@ export function IntakeStep({ k, edit, openModal, next }) {
       <Where k={k} edit={edit} />
       <Safety k={k} edit={edit} openModal={openModal} />
 
-      <Section id="h-who" title="Who's calling" icon="users">
+      {k.direction === 'out' && (
+        <div className="notice is-info asc-outreach">
+          <Icon name="phone" size={18} />
+          <p><strong>Outreach call.</strong> {k.purpose ? 'Calling about: ' + k.purpose.text : 'You reached out to them.'}</p>
+        </div>
+      )}
+
+      <Section id="h-who" title={k.direction === 'out' ? 'Who you’re talking to' : 'Who’s calling'} icon="users">
         {c && c.guardian && (
           <div className="asc-confirm">
             <p id="h-cconf"><strong>On file:</strong> {c.guardian.name}, {c.guardian.relationship.toLowerCase()} · {c.guardian.phone}. Is this who you're talking to?</p>
             <Options labelId="h-cconf" value={i.callerConfirmed} options={['Yes, ' + c.guardian.name, 'Someone else']}
-              onChange={(v) => edit({ intake: v && v !== 'Someone else' ? { callerConfirmed: v, caller: 'Parent or guardian', callerDetail: c.guardian.name + ', ' + c.guardian.relationship.toLowerCase() } : { callerConfirmed: v } }, { now: true })} />
+              onChange={(v) => { const n = c.guardian.name.split(' '); edit({ intake: v && v !== 'Someone else' ? { callerConfirmed: v, caller: 'Parent or guardian', callerFirst: n.slice(0, -1).join(' ') || n[0], callerLast: n.length > 1 ? n[n.length - 1] : '', callerRelation: c.guardian.relationship, callerPhone: c.guardian.phone } : { callerConfirmed: v } }, { now: true }); }} />
           </div>
         )}
-        <p className="field-label" id="h-caller">Caller</p>
+        <p className="field-label" id="h-caller">{k.direction === 'out' ? 'Talking with' : 'Caller'}</p>
         <Options labelId="h-caller" value={i.caller} options={CALLERS} onChange={set('caller', true)} />
-        {i.caller && <Detail id="asc-caller-detail" spec={CALLER_DETAIL[i.caller]} value={i.callerDetail} onChange={set('callerDetail')} />}
+        {i.caller && <CallerFields i={i} set={set} />}
         <p className="field-label" id="h-age">Age of the person who needs help</p>
         <Options labelId="h-age" value={i.age} options={AGES} onChange={set('age', true)} />
       </Section>
@@ -317,10 +368,13 @@ export function IntakeStep({ k, edit, openModal, next }) {
         {known ? (
           <>
             <MatchCard k={k} />
+            {k.clientId && <AtAGlance clientId={k.clientId} contactId={k.id} />}
             {k.clientId && !stepsFor(k).some((s) => s[0] === 'identify') && <PossibleLinks k={k} edit={edit} />}
           </>
         ) : <ClientFinder k={k} edit={edit} />}
       </Section>
+
+      <Consent k={k} edit={edit} />
 
       <Reach k={k} edit={edit} />
 
@@ -344,10 +398,12 @@ export function IntakeStep({ k, edit, openModal, next }) {
         {i.coverage && i.coverage !== 'None' && i.coverage !== 'Doesn’t know' && <div className="form-grid is-2"><Field id="asc-cov" label="Plan (optional)" value={i.coverageDetail} onChange={set('coverageDetail')} placeholder="For example: HealthChoices through CCBH" /></div>}
       </Section>
 
-      <Section id="h-found" title="How they found us" icon="search">
-        <Options label="How they found us" value={i.found} options={FOUND} onChange={set('found', true)} />
-        {i.found && <Detail id="asc-found-detail" spec={FOUND_DETAIL[i.found]} value={i.foundDetail} onChange={set('foundDetail')} />}
-      </Section>
+      {k.direction !== 'out' && (
+        <Section id="h-found" title="How they found us" icon="search">
+          <Options label="How they found us" value={i.found} options={FOUND} onChange={set('found', true)} />
+          {i.found && <Detail id="asc-found-detail" spec={FOUND_DETAIL[i.found]} value={i.foundDetail} onChange={set('foundDetail')} />}
+        </Section>
+      )}
 
       {next && <div className="asc-foot"><span /><button type="button" className="btn-primary is-icon" onClick={() => navigate({ page: 'contact', id: k.id, step: next[0] })}>Next: {next[1]}<Icon name="arrowRight" /></button></div>}
     </div>

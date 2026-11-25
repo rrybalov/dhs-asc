@@ -84,6 +84,7 @@ Every release is kept on its own branch, so nothing is lost:
 | `archive/v4.4` | IPV High Risk Team Review; each CoLab's sidebar shows its own pages |
 | `archive/v4.5` | Find a Provider in the ASC Interactions step; "Referred to" on each interaction |
 | `archive/v4.6` | Intake asks who the client is, with contact info and demographics; 18–25 age group; no Identify step for known clients; blank interaction to start; providers sorted by distance; outcomes filled in |
+| `archive/v4.7` | Outreach calls and attempts, Next Up, referrals from other programs, action item statuses, resolving open needs, caller name fields, consent to share information, interaction time as ranges |
 
 `CHANGELOG.md` lists what changed in each.
 

@@ -4,7 +4,8 @@
 import { SCREENING, CHANNELS, shown } from './asc.js';
 
 const INTAKE = {
-  safety: 'Safety', privacy: 'Where they’re talking', caller: 'Caller', callerOther: 'Caller', callerName: 'Caller’s name', callerDetail: 'About the caller',
+  safety: 'Safety', privacy: 'Where they’re talking', caller: 'Caller', callerOther: 'Caller', callerName: 'Caller’s name', callerDetail: 'Notes about the caller', callerFirst: 'Caller’s first name', callerLast: 'Caller’s last name', callerRelation: 'Caller’s relationship or agency', callerPhone: 'Caller’s phone',
+  consent: 'Consent to share information', consentBy: 'Consent given by',
   clientFirst: 'Client’s first name, as given', clientLast: 'Client’s last name, as given', foundDetail: 'How they found us, details',
   callerConfirmed: 'Guardian on file', age: 'Person who needs help', story: 'In their words', coverage: 'Coverage',
   coverageDetail: 'Coverage plan', coverageConfirmed: 'Coverage on file', found: 'How they found us', foundOther: 'How they found us',
@@ -15,7 +16,7 @@ const TEXT = ['story', 'callerDetail', 'foundDetail'];
 const REACH = { street: 'street address', city: 'city', state: 'state', zip: 'ZIP', phone: 'phone', email: 'email' };
 const DEMO = { dob: 'date of birth', gender: 'gender', legalSex: 'legal sex', race: 'race', ethnicity: 'ethnicity', language: 'primary language', marital: 'marital status', living: 'living arrangement' };
 const FOLLOW = { ok: 'Follow-up permission', how: 'Best way to reach them', time: 'Best time' };
-const ANON = { name: 'First name or nickname', zip: 'ZIP', county: 'County', language: 'Language' };
+const ANON = { name: 'First name or nickname', last: 'Last name', zip: 'ZIP', county: 'County', language: 'Language' };
 const MERGE_MS = 5 * 60 * 1000;
 
 const val = (v) => (v === null || v === undefined || v === '' ? 'cleared' : shown(v));

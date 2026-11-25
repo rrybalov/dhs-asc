@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Icon, BrandMark } from '../../ui/icons.jsx';
 import { useModalControls } from '../../state/modal.js';
 import { useApi, usePref } from '../../state/store.jsx';
-import { useCloseouts } from '../../state/asc.js';
+import { useCloseouts, useAscReferrals } from '../../state/asc.js';
 import { SUPERVISOR } from '../../data/asc.js';
 import { useMutations, useSession } from '../../state/data.js';
 import { Link, navigate, colabHome, ASC_VIEWS, IPV_VIEWS } from '../../router.jsx';
@@ -91,14 +91,17 @@ function AscSideNav({ route }) {
   const [saved] = usePref('asc.view', 'in-progress');
   const onContacts = route.page === 'asc' && !route.sub;
   const view = route.view || saved;
-  const items = [['closeouts', 'door', 'Close-Outs', waiting]].concat(sup ? [['team', 'users', 'Team'], ['reporting', 'chart', 'State Reporting']] : []);
+  const { referrals } = useAscReferrals();
+  const fresh = referrals.filter((r) => r.status === 'new' && (!r.assignee || r.assignee === me)).length;
+  const items = [['referrals', 'inbox', 'Referrals', fresh, 'new'], ['closeouts', 'door', 'Close-Outs', waiting, 'waiting']].concat(sup ? [['team', 'users', 'Team'], ['reporting', 'chart', 'State Reporting']] : []);
   return (
     <>
+      <Link className="side-link" to="#asc/next" aria-current={route.page === 'asc' && route.sub === 'next' ? 'page' : undefined}><Icon name="list" size={18} />Next Up</Link>
       <Link className={'side-link' + (onContacts ? ' is-open' : '')} to="#asc"><Icon name="headset" size={18} />Contacts</Link>
       {onContacts && <SubLinks label="Contact views" items={Object.keys(ASC_VIEWS).map((v) => ['#asc/' + v, ASC_VIEWS[v], view === v])} />}
-      {items.map(([id, ic, label, n]) => (
+      {items.map(([id, ic, label, n, what]) => (
         <Link key={id} className="side-link" to={'#asc/' + id} aria-current={route.page === 'asc' && route.sub === id ? 'page' : undefined}>
-          <Icon name={ic} size={18} />{label}{n > 0 && <span className="side-count" aria-label={n + ' waiting'}>{n}</span>}
+          <Icon name={ic} size={18} />{label}{n > 0 && <span className="side-count" aria-label={n + ' ' + what}>{n}</span>}
         </Link>
       ))}
     </>

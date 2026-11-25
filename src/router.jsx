@@ -8,7 +8,8 @@ export const HUB_PAGES = { home: 'CoLab Home', 'my-action-items': 'Action Items'
 export const colabHome = (id) => (!id ? '#home' : id === 'ASC' ? '#asc' : id === 'IPV' ? '#ipv' : '#colab/' + encodeURIComponent(id));
 export const CONTACT_STEPS = ['intake', 'identify', 'interactions', 'wrap-up'];
 // The ASC home's own pages, after Contacts (#asc). Team and State Reporting are for supervisors.
-export const ASC_PAGES = { closeouts: 'Close-Outs', team: 'Team', reporting: 'State Reporting' };
+export const ASC_PAGES = { next: 'Next Up', referrals: 'Referrals', closeouts: 'Close-Outs', team: 'Team', reporting: 'State Reporting' };
+export const REFERRAL_VIEWS = { new: 'New', contacted: 'Contacted', enrolled: 'Enrolled', closed: 'Declined or Unreachable', all: 'All' };
 // ASC Contacts views, and IPV's referral views. Each is its own address, so the sidebar and the page's status bar agree.
 export const ASC_VIEWS = { 'in-progress': 'In Progress', mine: 'Mine', closed: 'Closed', all: 'All Contacts' };
 export const IPV_VIEWS = { all: 'All Referrals', intake: 'Intake', review: 'For Review', reviewed: 'Reviewed' };
@@ -17,6 +18,7 @@ export function parse(hash) {
   const parts = decodeURIComponent((hash || '').replace(/^#\/?/, '')).split('/').filter(Boolean);
   if (!parts.length || parts[0] === 'home') return { page: 'home' };
   if (parts[0] === 'asc' && parts[1] === 'contact' && parts[2]) return { page: 'contact', id: parts[2], step: CONTACT_STEPS.includes(parts[3]) ? parts[3] : 'intake' };
+  if (parts[0] === 'asc' && parts[1] === 'referrals') return { page: 'asc', sub: 'referrals', view: REFERRAL_VIEWS[parts[2]] ? parts[2] : 'new' };
   if (parts[0] === 'asc' && ASC_PAGES[parts[1]]) return { page: 'asc', sub: parts[1] };
   if (parts[0] === 'asc' && ASC_VIEWS[parts[1]]) return { page: 'asc', view: parts[1] };
   if (parts[0] === 'ipv' && parts[1] === 'referral' && parts[2]) return { page: 'referral', id: parts[2] };
@@ -42,7 +44,7 @@ export function parse(hash) {
 export function href(r) {
   if (r.page === 'contact') return '#asc/contact/' + r.id + '/' + (r.step || 'intake');
   if (r.page === 'colab') return colabHome(r.id);
-  if (r.page === 'asc' && r.sub) return '#asc/' + r.sub;
+  if (r.page === 'asc' && r.sub) return '#asc/' + r.sub + (r.sub === 'referrals' && r.view && r.view !== 'new' ? '/' + r.view : '');
   if (r.page === 'asc' && r.view) return '#asc/' + r.view;
   if (r.page === 'ipv') return '#ipv/' + (r.view || 'intake');
   if (r.page === 'referral') return '#ipv/referral/' + r.id;

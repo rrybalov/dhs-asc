@@ -109,19 +109,25 @@ export function createAction(db, clientId, body) {
   client(db, clientId);
   const a = {
     id: body.id || newId('a'), clientId, tag: body.tag || 'PERSONAL', text: text(body.text),
-    assignee: body.assignee || db.userId, due: body.due || '', done: !!body.done, edited: !!body.edited, createdAt: new Date().toISOString()
+    assignee: body.assignee || db.userId, due: body.due || '', done: !!body.done, edited: !!body.edited, createdAt: new Date().toISOString(),
+    status: body.done ? 'done' : 'open', attempts: []
   };
   db.actions.unshift(a);
   return a;
 }
 // Toggling done is not an edit; changing the text, assignee or due date is.
+const ACTION_STATUSES = { open: 'open', progress: 'open', waiting: 'open', done: 'closed', unreachable: 'closed', cant: 'closed' };
 export function updateAction(db, id, patch) {
   const a = db.actions.find((x) => x.id === id); if (!a) throw new NotFound('Action item');
   let edited = false;
   if ('text' in patch) { a.text = text(patch.text); edited = true; }
   if ('assignee' in patch) { a.assignee = patch.assignee || db.userId; edited = true; }
   if ('due' in patch) { a.due = patch.due || ''; edited = true; }
-  if ('done' in patch) a.done = !!patch.done;
+  // Status and done move together: Done, Unable to reach and Can't complete all close the item.
+  if ('status' in patch) {
+    if (!ACTION_STATUSES[patch.status]) throw new BadRequest('Unknown status.');
+    a.status = patch.status; a.done = ACTION_STATUSES[patch.status] === 'closed';
+  } else if ('done' in patch) { a.done = !!patch.done; a.status = a.done ? 'done' : 'open'; }
   if (edited) a.edited = true;
   return a;
 }

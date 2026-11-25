@@ -17,6 +17,10 @@ const STATE_SPEC = { grid: 'minmax(120px,1.2fr) minmax(90px,1fr) 100px 90px 70px
 export function wrapIssues(k) {
   const out = k.clientId ? reportingIssues(k).map((i) => ({ ...i, kind: 'error' })) : [];
   if (k.clientId && !k.followUp.ok) out.push({ id: 'follow', step: 'interactions', kind: 'warn', title: 'Follow-up not asked.', text: 'Nothing is scheduled until they say it’s OK.' });
+  if (k.intake.consent !== 'Yes') {
+    const referred = k.interactions.some((x) => x.referral && x.referral.name);
+    out.push({ id: 'consent', step: 'intake', kind: 'warn', title: 'Consent to share information not captured.', text: referred ? 'They were referred to a provider. Capture consent, or don’t share their details.' : 'Capture it on Intake if they agree.' });
+  }
   const over = overtime(k);
   if (over) out.push({ id: 'over', step: 'interactions', kind: 'warn', title: over.documented + ' minutes documented in a ' + over.length + '-minute contact.', text: 'Check the minutes; they go to the state.' });
   return out;
@@ -149,7 +153,7 @@ export function WrapUpStep({ k, edit, flush }) {
       <Section id="h-check" title="Before you close" icon="database">
         <ul className="asc-checks">
           {issues.map((i) => <li key={i.id} className={i.kind === 'error' ? 'is-error' : 'is-warn'}><Icon name="alert" size={16} /><span><strong>{i.title}</strong> {i.text}</span><button type="button" className="btn-outline is-small" onClick={() => fix(i.step)}>Go to Step</button></li>)}
-          {!issues.length && <li className="is-good"><Icon name="check" size={16} /><span>{k.clientId ? 'Ready for state reporting.' : k.identity === 'unverified' ? 'Counted in ASC reports. Sent to the state once verified.' : 'Anonymous. Counted in ASC reports. Reference number ' + k.ref + '.'}</span></li>}
+          {!issues.some((i) => i.kind === 'error') && <li className="is-good"><Icon name="check" size={16} /><span>{k.clientId ? 'Ready for state reporting.' : k.identity === 'unverified' ? 'Counted in ASC reports. Sent to the state once verified.' : 'Anonymous. Counted in ASC reports. Reference number ' + k.ref + '.'}</span></li>}
         </ul>
         {k.clientId && k.interactions.length > 0 && <StateTable k={k} />}
       </Section>

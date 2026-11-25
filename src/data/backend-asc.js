@@ -2,7 +2,7 @@
 // follow-ups, and contact history. Like backend.js, these run in the browser's sample-data source and in
 // tools/mock-api.mjs. docs/API.md describes the endpoints.
 import { NotFound, BadRequest, Forbidden, summary, fullRecord, newId, createNote } from './backend.js';
-import { followUpPlan, SCREENING, totals, plural, summaryNote, isSummaryNote, LEGACY, OPEN, CRISIS, SUPERVISOR, addBusinessDays, dayOf, shown, DISCHARGE_REASONS, ageGroupFor, blankReach, blankDemo, REACH_FIELDS, DEMO_FIELDS } from './asc.js';
+import { followUpPlan, SCREENING, totals, plural, summaryNote, isSummaryNote, LEGACY, OPEN, CRISIS, SUPERVISOR, addBusinessDays, dayOf, shown, DISCHARGE_REASONS, ageGroupFor, blankReach, blankDemo, REACH_FIELDS, DEMO_FIELDS, ACTION_STATUS, CLOSED_STATUS, ATTEMPT_RESULTS, REFERRAL_STATUS, REFERRAL_SOURCES, MIN_RANGES, unitsFor, weekday } from './asc.js';
 const DISCHARGE_REASONS_SET = new Set(DISCHARGE_REASONS);
 import { describePatch, appendLog, backfillLog } from './asc-log.js';
 import { ASC_ENROLLMENT } from './asc-seed.js';
@@ -12,7 +12,7 @@ const usOf = (d) => pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + '/' + d.get
 const findContact = (db, id) => { const k = (db.contacts || []).find((x) => x.id === id); if (!k) throw new NotFound('Contact'); return k; };
 const findClient = (db, id) => { const c = db.clients.find((x) => x.id === id); if (!c) throw new NotFound('Client'); return c; };
 const clone = (v) => JSON.parse(JSON.stringify(v));
-const ensure = (db) => { if (!db.contacts) db.contacts = []; if (!db.contactSeq) db.contactSeq = 184; if (db.ascModel !== 5) migrate(db); };
+const ensure = (db) => { if (!db.contacts) db.contacts = []; if (!db.contactSeq) db.contactSeq = 184; if (db.ascModel !== 6) migrate(db); };
 
 // v4.1 renamed outcomes, merged screening's "Not sure" and "Prefers not to say" into "Skip", shortened the safety
 // answer and added roles. Stored data is upgraded once, in place.
@@ -27,11 +27,32 @@ function migrate(db) {
     if (k.correction === undefined) k.correction = null;
     backfillLog(k); // v4.2: a step-by-step log, built from the answers for contacts saved before it existed
     upgradeIntake(db, k); // v4.6
+    upgradeOutreach(k); // v4.7
   });
+  (db.actions || []).forEach(upgradeAction);
+  if (!db.ascReferrals) seedReferrals(db); // v4.7: referrals from other programs, waiting for a call
   (db.staff || []).forEach((s) => { if (!s.role && ROLES[s.id]) s.role = ROLES[s.id]; });
   (db.clients || []).forEach((c) => syncAscService(db, c));
   if (!db.closeouts) seedCloseout(db); // v4.3: one request waiting, so the supervisor's queue isn't empty
-  db.ascModel = 5;
+  db.ascModel = 6;
+}
+// v4.7: outreach (who started the conversation, and what it was for), the caller's name and details as separate
+// fields, consent to share information, a last name for anonymous and name-only contacts, minute ranges,
+// and statuses and call attempts on action items.
+function upgradeOutreach(k) {
+  if (!k.direction) k.direction = 'in';
+  if (k.purpose === undefined) k.purpose = null;
+  const i = k.intake;
+  ['callerFirst', 'callerLast', 'callerRelation', 'callerPhone', 'consentBy', 'consentAt'].forEach((f) => { if (i[f] === undefined) i[f] = ''; });
+  if (i.consent === undefined) i.consent = null;
+  if (k.anon && k.anon.last === undefined) k.anon.last = '';
+  if (k.unverifiedFirst === undefined) { const p = String(k.unverifiedName || '').trim().split(/\s+/); k.unverifiedFirst = p.length > 1 ? p.slice(0, -1).join(' ') : p[0] || ''; k.unverifiedLast = p.length > 1 ? p[p.length - 1] : ''; }
+  (k.interactions || []).forEach((x) => { if (x.range === undefined) x.range = Number(x.min) > 0 ? 'custom' : ''; });
+  (k.actions || []).forEach(upgradeAction);
+}
+function upgradeAction(a) {
+  if (!a.status) a.status = a.done ? 'done' : 'open';
+  if (!a.attempts) a.attempts = [];
 }
 // v4.6: one detail box under each caller and "how they found us" answer (replacing "Other" and the caller's name),
 // the client's name as the caller gives it, contact info and demographics, and the 18–25 age group.
@@ -70,7 +91,8 @@ function contactSummary(db, k) {
   return {
     id: k.id, ref: k.ref, channel: k.channel, site: k.site, startedAt: k.startedAt, endedAt: k.endedAt, status: k.status, closedKind: k.closedKind,
     staff: k.staff, clientId: k.clientId, identity: k.identity, path: k.path, clientName: clientName(c) || (k.identity === 'unverified' ? k.unverifiedName : ''),
-    anonName: k.anon.name, needs: k.needs.map((n) => ({ name: n.name, urg: n.urg, outcome: n.outcome })), ixCount: t.count, ixMin: t.min, ixUnits: t.units
+    anonName: [k.anon.name, k.anon.last].filter(Boolean).join(' '), needs: k.needs.map((n) => ({ name: n.name, urg: n.urg, outcome: n.outcome, resolvedAt: n.resolvedAt || '' })), ixCount: t.count, ixMin: t.min, ixUnits: t.units,
+    direction: k.direction || 'in', purpose: k.purpose ? k.purpose.text : ''
   };
 }
 
@@ -110,20 +132,42 @@ export function createContact(db, body = {}) {
     logId: (channel === 'person' ? 'VS-0912-' : 'CL-4417-') + String(4000 + n), site: channel === 'person' ? (body.site || 'Mercy Behavioral Health') : '',
     startedAt: new Date().toISOString(), endedAt: null, status: 'open', closedKind: null, staff: db.userId,
     clientId: null, identity: null, candidateId: null, possibleClientId: null, path: null, group: '', priorRefs: [], linkedPrior: null,
-    anon: { name: '', zip: '', county: 'Allegheny', language: 'English' }, unverifiedName: '',
-    intake: { safety: null, caller: null, callerDetail: '', clientFirst: '', clientLast: '', age: null, story: '', reason: null, reasonText: '', coverage: null, coverageDetail: '', found: null, foundDetail: '', privacy: null, callerConfirmed: null, coverageConfirmed: null },
+    anon: { name: '', last: '', zip: '', county: 'Allegheny', language: 'English' }, unverifiedName: '', unverifiedFirst: '', unverifiedLast: '',
+    intake: { safety: null, caller: null, callerFirst: '', callerLast: '', callerRelation: '', callerPhone: '', callerDetail: '', clientFirst: '', clientLast: '', age: null, story: '', reason: null, reasonText: '', coverage: null, coverageDetail: '', found: null, foundDetail: '', privacy: null, callerConfirmed: null, coverageConfirmed: null, consent: null, consentBy: '', consentAt: '' },
+    direction: body.direction === 'out' ? 'out' : 'in', purpose: null,
     reach: blankReach(), demo: blankDemo(), identifiedIn: null,
     screening: { mh: null, ph: null, house: null, food: null, su: null },
     needs: [], interactions: [], followUp: { ok: null, how: 'Phone call', time: '' }, onsite: { idCheck: null, consentSigned: '', docs: [] },
     notes: [], actions: [], links: [], urgent: null, correction: null, corrections: [], log: [], reminderId: null, createdAt: new Date().toISOString()
   };
-  appendLog(k, [{ key: 'start', text: channel === 'person' ? 'Started an in-person visit at ' + k.site : 'Started a phone call' }], db.userId);
-  if (body.clientId) {
-    const c = findClient(db, body.clientId);
+  appendLog(k, [{ key: 'start', text: channel === 'person' ? 'Started an in-person visit at ' + k.site : k.direction === 'out' ? 'Started an outreach call' : 'Started a phone call' }], db.userId);
+  // Outreach for an action item or a referral: the call is about that item, and the person is usually known.
+  let clientId = body.clientId;
+  if (body.actionId) {
+    const a = db.actions.find((x) => x.id === body.actionId); if (!a) throw new NotFound('Action item');
+    k.direction = 'out'; k.purpose = { kind: 'action', actionId: a.id, referralId: '', text: a.text };
+    clientId = a.clientId;
+    if (!CLOSED_STATUS.includes(a.status)) a.status = 'progress';
+  } else if (body.referralId) {
+    const r = findReferral(db, body.referralId);
+    k.direction = 'out'; k.purpose = { kind: 'referral', actionId: '', referralId: r.id, text: 'Referral from ' + r.source + ': ' + r.reason };
+    Object.assign(k.intake, { clientFirst: r.person.first, clientLast: r.person.last });
+    if (r.person.dob) k.demo.dob = r.person.dob;
+    if (r.person.phone) k.reach.phone = r.person.phone;
+    if (r.person.zip) k.reach.zip = r.person.zip;
+    const c = r.clientId ? findClient(db, r.clientId) : null;
+    if (c && (c.colabs.indexOf('ASC') >= 0 || c.ascDischarge)) clientId = c.id; else if (c) { k.candidateId = c.id; k.path = 'client'; }
+    if (r.status === 'new') r.status = 'contacted';
+    r.contactIds.push(k.id);
+    r.log.push({ at: k.startedAt, by: db.userId, text: 'Reached by phone: ' + k.ref });
+  } else if (body.direction === 'out' && body.purpose) k.purpose = { kind: 'other', actionId: '', referralId: '', text: String(body.purpose).slice(0, 300) };
+  if (k.purpose) appendLog(k, [{ key: 'purpose', text: 'Calling about: ' + k.purpose.text }], db.userId);
+  if (clientId) {
+    const c = findClient(db, clientId);
     if (c.colabs.indexOf('ASC') < 0 && !c.ascDischarge) throw new BadRequest('This client is not enrolled in ASC.');
     const back = !!c.ascDischarge;
     enroll(c); // a discharged client who comes back is re-enrolled
-    Object.assign(k, { clientId: c.id, identity: 'matched', path: 'client', identifiedIn: 'profile' });
+    Object.assign(k, { clientId: c.id, identity: 'matched', path: 'client', identifiedIn: 'profile', candidateId: null });
     k.intake.age = ageGroupFor(c.dob);
     appendLog(k, [{ key: 'identity', text: 'Started from ' + c.first + ' ' + c.last + '’s record' + (back ? ', re-enrolled in ASC' : '') }], db.userId);
     syncAscService(db, c);
@@ -181,7 +225,11 @@ const cleanMin = (v) => { const t = text(v, 6).trim(); const m = Number(t); retu
 // Who they were referred to: a snapshot from the provider directory, or a name typed in for someone not in it.
 const cleanReferral = (r) => (!r || typeof r !== 'object' || !text(r.name, 200) ? null
   : { providerId: text(r.providerId, 60), facilityId: text(r.facilityId, 80), name: text(r.name, 200), site: text(r.site, 200), phone: text(r.phone, 40), address: text(r.address, 300) });
-const cleanIx = (x) => ({ id: text(x.id, 40), what: text(x.what, 300), need: text(x.need, 40), type: text(x.type, 120), how: text(x.how, 60), min: cleanMin(x.min), place: text(x.place, 120), notes: text(x.notes, 4000), referral: cleanReferral(x.referral) });
+// A range sets the minutes to its top (so units come out right); "custom" keeps the minutes typed.
+const cleanIx = (x) => {
+  const range = MIN_RANGES[x.range] || x.range === 'custom' ? x.range : '';
+  return { id: text(x.id, 40), what: text(x.what, 300), need: text(x.need, 40), type: text(x.type, 120), how: text(x.how, 60), range, min: MIN_RANGES[range] ? String(MIN_RANGES[range].min) : cleanMin(x.min), place: text(x.place, 120), notes: text(x.notes, 4000), referral: cleanReferral(x.referral) };
+};
 
 export function updateContact(db, id, patch = {}) {
   ensure(db);
@@ -214,6 +262,10 @@ export function updateContact(db, id, patch = {}) {
     k.candidateId = patch.candidateId || null;
   }
   if ('unverifiedName' in patch) k.unverifiedName = String(patch.unverifiedName || '');
+  ['unverifiedFirst', 'unverifiedLast'].forEach((f) => { if (f in patch) k[f] = text(patch[f], 80); });
+  if ('unverifiedFirst' in patch || 'unverifiedLast' in patch) k.unverifiedName = [k.unverifiedFirst, k.unverifiedLast].filter(Boolean).join(' ');
+  // When consent is captured, and who gave it.
+  if (patch.intake && 'consent' in patch.intake) k.intake.consentAt = k.intake.consent === 'Yes' ? new Date().toISOString() : '';
   if ('identity' in patch) {
     if (patch.identity !== 'unverified' && patch.identity !== null) throw new BadRequest('Link a client to set a matched identity.');
     if (k.clientId) throw new BadRequest('This contact is already on a client record.');
@@ -358,6 +410,11 @@ export function linkContact(db, id, body = {}) {
 
   enroll(c);
   Object.assign(k, { clientId: c.id, identity, path: 'client', candidateId: null, unverifiedName: '', identifiedIn: body.from === 'intake' ? 'intake' : 'identify' });
+  // A referral's person who is now on a record and enrolled.
+  if (k.purpose && k.purpose.referralId) {
+    const r = (db.ascReferrals || []).find((x) => x.id === k.purpose.referralId);
+    if (r) { r.clientId = c.id; r.status = 'enrolled'; r.log.push({ at: new Date().toISOString(), by: db.userId, text: 'Enrolled in ASC on ' + k.ref }); }
+  }
   if (!k.intake.age) k.intake.age = ageGroupFor(c.dob);
   // Contact info typed before they were found goes on their record. A new client's record was just made from it.
   if (identity !== 'new' && REACH_FIELDS.some(([key]) => k.reach[key] != null)) saveAscAddress(db, k);
@@ -418,7 +475,13 @@ export function closeContact(db, id, body = {}) {
   k.summarized = true; // contacts closed before v4.0.2 have no summary note
   const reminder = remindOpenItems(db, k);
   if (k.clientId) syncAscService(db, findClient(db, k.clientId));
-  return { contact: full(db, k), notes, actions: reminder ? [clone(reminder)] : [] };
+  // The call an action item asked for happened, so the item is done.
+  const changed = reminder ? [clone(reminder)] : [];
+  if (k.purpose && k.purpose.actionId) {
+    const a = db.actions.find((x) => x.id === k.purpose.actionId);
+    if (a && !CLOSED_STATUS.includes(a.status)) { a.status = 'done'; a.done = true; changed.push(clone(a)); appendLog(k, [{ key: 'purpose.done', text: 'Marked “' + a.text + '” done' }], db.userId); }
+  }
+  return { contact: full(db, k), notes, actions: changed };
 }
 
 // Action items still open from this conversation: ones added during it (or tied to its interactions), not the
@@ -519,10 +582,11 @@ export function contactHistory(db, q = {}) {
   related.forEach((x) => x.needs.forEach((n) => {
     if (seenNeeds.has(n.name)) return;
     seenNeeds.add(n.name);
-    if (n.outcome === OPEN) open.push({ kind: 'Open need', text: n.name, need: n.name, urg: n.urg, contactId: x.id, ref: x.ref, meta: n.urg + ' · open since ' + usOf(new Date(x.startedAt)) + ' · ' + staffName(x.staff) + ' · ' + x.ref });
+    if (n.outcome === OPEN && !n.resolvedAt && x.status === 'closed') open.push({ kind: 'Open need', text: n.name, need: n.name, needId: n.id, urg: n.urg, contactId: x.id, ref: x.ref, meta: n.urg + ' · open since ' + usOf(new Date(x.startedAt)) + ' · ' + staffName(x.staff) + ' · ' + x.ref });
   }));
   related.forEach((x) => x.actions.filter((a) => !a.done).forEach((a) => open.push({ kind: 'Action item', text: a.text, contactId: x.id, ref: x.ref, actionId: a.id, meta: staffName(a.assignee) + ' · due ' + due(a) + ' · from ' + x.ref })));
-  if (clientId) db.actions.filter((a) => a.clientId === clientId && a.tag === 'ASC' && !a.done).forEach((a) => open.push({ kind: 'Action item', text: a.text, actionId: a.id, clientId, meta: staffName(a.assignee) + ' · due ' + due(a) }));
+  const tries = (a) => (a.attempts && a.attempts.length ? ' · ' + plural(a.attempts.length, 'call attempt', 'call attempts') : '');
+  if (clientId) db.actions.filter((a) => a.clientId === clientId && a.tag === 'ASC' && !a.done).forEach((a) => open.push({ kind: 'Action item', text: a.text, actionId: a.id, clientId, status: a.status || 'open', meta: staffName(a.assignee) + ' · due ' + due(a) + tries(a) }));
   return {
     openItems: open,
     contacts: related.map((x) => ({
@@ -531,7 +595,7 @@ export function contactHistory(db, q = {}) {
       screening: SCREENING.filter((s) => x.screening[s.key]).map((s) => s.label + ': ' + x.screening[s.key]),
       minutes: x.endedAt ? Math.round((new Date(x.endedAt) - new Date(x.startedAt)) / 60000) : 0,
       // The full record, for the opt-in view of everything the coordinator filled in, and the step-by-step log.
-      record: { id: x.id, ref: x.ref, channel: x.channel, site: x.site, startedAt: x.startedAt, endedAt: x.endedAt, status: x.status, closedKind: x.closedKind, staff: x.staff, identity: x.identity, unverifiedName: x.unverifiedName, path: x.path, anon: x.anon, intake: x.intake, screening: x.screening, needs: x.needs, interactions: x.interactions, followUp: x.followUp, onsite: x.onsite, urgent: x.urgent, corrections: x.corrections, log: x.log, clientId: x.clientId },
+      record: { id: x.id, ref: x.ref, channel: x.channel, direction: x.direction, purpose: x.purpose, site: x.site, startedAt: x.startedAt, endedAt: x.endedAt, status: x.status, closedKind: x.closedKind, staff: x.staff, identity: x.identity, unverifiedName: x.unverifiedName, path: x.path, anon: x.anon, intake: x.intake, screening: x.screening, needs: x.needs, interactions: x.interactions, followUp: x.followUp, onsite: x.onsite, urgent: x.urgent, corrections: x.corrections, log: x.log, clientId: x.clientId },
       totalsText: plural(x.interactions.length, 'interaction', 'interactions')
     }))
   };
@@ -690,7 +754,7 @@ export function stateReport(db, period) {
     if (!k.interactions.length) rows.push({ id: k.id + '-none', contactId: k.id, ref: k.ref, clientId: c.id, clientName: clientName(c), mci: c.mci, code: '', date: isoDay(dayOf(k.startedAt)), units: 0, place: '', coordinator: staffLabel(db, k.staff), problems: ['No interactions documented'].concat(clientProblems) });
     k.interactions.forEach((x) => {
       const problems = clientProblems.slice();
-      const units = Number(x.min) > 0 ? Math.max(1, Math.round(Number(x.min) / 15)) : 0;
+      const units = unitsFor(x.min);
       if (!units) problems.push('Minutes missing');
       if (!x.place) problems.push('Place of service missing');
       const code = /T1016\w+/.exec(x.type || '');
@@ -715,4 +779,171 @@ export function submitReport(db, period) {
   const prev = (db.ascReports || {})[period];
   db.ascReports = { ...(db.ascReports || {}), [period]: { by: db.userId, at: new Date().toISOString(), rows: r.totals.rows, units: r.totals.units, contacts: r.totals.contacts, version: prev ? prev.version + 1 : 1 } };
   return stateReport(db, period);
+}
+
+// ================================================================== outreach: referrals, call attempts, next up
+const DAY = 86400000;
+const isoAgo = (days, hour = 10) => { const d = new Date(Date.now() - days * DAY); d.setHours(hour, 15, 0, 0); return d.toISOString(); };
+const findReferral = (db, id) => { const r = (db.ascReferrals || []).find((x) => x.id === id); if (!r) throw new NotFound('Referral'); return r; };
+const attemptOf = (db, body) => {
+  const result = String(body.result || '');
+  if (ATTEMPT_RESULTS.indexOf(result) < 0) throw new BadRequest('Choose what happened on the call.');
+  return { id: newId('t'), at: new Date().toISOString(), by: db.userId, result, note: String(body.note || '').trim().slice(0, 1000) };
+};
+
+// Referrals from other programs. In production these arrive from each program's system; here a few are seeded,
+// all fictional, and "Simulate a referral" adds one.
+const SAMPLE_REFERRALS = [
+  { source: 'CYF', clientId: 'c9', days: 1, status: 'new', assignee: '', referrer: { name: 'Jordan Price', role: 'CYF caseworker, East Region office', phone: '412-555-0190' },
+    reason: 'Open CYF case. Caseworker wants her connected to outpatient mental health and a parenting group.', needs: ['Mental health, adult'] },
+  { source: 'CYF', clientId: 'c29', days: 3, status: 'new', assignee: 'u1', referrer: { name: 'Renee Castillo', role: 'CYF caseworker, Central Region office', phone: '412-555-0174' },
+    reason: 'Drug and alcohol assessment is part of the family service plan.', needs: ['Substance use treatment'], attempts: [[2, 'No answer', '']] },
+  { source: 'HMIS', clientId: 'c32', days: 2, status: 'new', assignee: 'u1', referrer: { name: 'Pat Okafor', role: 'Shelter case manager, Smithfield Street shelter', phone: '412-555-0133' },
+    reason: 'Staying at the shelter. Asked for help finding a psychiatrist and renewing Medical Assistance.', needs: ['Mental health, adult', 'Health coverage (MA or HealthChoices)'], attempts: [[2, 'Left a voicemail', 'Left the ASC number.'], [1, 'No answer', '']] },
+  { source: 'HMIS', person: { first: 'Dana', last: 'Kirby', dob: '1988-06-12', phone: '412-555-0142', zip: '15222' }, days: 0, status: 'new', assignee: '', referrer: { name: 'Sam Reyes', role: 'Street outreach, Operation Safety Net', phone: '412-555-0108' },
+    reason: 'Met by street outreach downtown. Interested in detox and a bed.', needs: ['Substance use treatment', 'Housing'] },
+  { source: 'JAIL', clientId: 'c17', days: 5, status: 'contacted', assignee: 'u2', referrer: { name: 'Kim Albright', role: 'Reentry specialist, Allegheny County Jail', phone: '412-555-0121' },
+    reason: 'Released next week. Needs his MAT continued and outpatient drug and alcohol treatment.', needs: ['Substance use treatment'] },
+  { source: 'HOSP', person: { first: 'Luis', last: 'Ortega', dob: '1979-02-03', phone: '412-555-0166', zip: '15210' }, days: 6, status: 'unreachable', assignee: 'u1', referrer: { name: 'Erin Walsh', role: 'Discharge planner, inpatient psychiatry', phone: '412-555-0157' },
+    reason: 'Discharged from inpatient psychiatry. Needs an outpatient appointment within 7 days.', needs: ['Mental health, adult'], attempts: [[5, 'No answer', ''], [4, 'Left a voicemail', ''], [3, 'Number disconnected', 'Number from the hospital no longer works.']] },
+  { source: 'CYF', clientId: 'c24', days: 9, status: 'declined', assignee: 'u6', referrer: { name: 'Jordan Price', role: 'CYF caseworker, East Region office', phone: '412-555-0190' },
+    reason: 'Father asked for help with housing and a mental health evaluation.', needs: ['Housing'], note: 'Already working with a case manager at Mercy. Doesn’t want a second one.' }
+];
+function referralFrom(db, x, i) {
+  const c = x.clientId ? db.clients.find((y) => y.id === x.clientId) : null;
+  const iso = (us) => (us ? us.slice(6) + '-' + us.slice(0, 2) + '-' + us.slice(3, 5) : '');
+  const person = c ? { first: c.first, last: c.last, dob: iso(c.dob), phone: c.phone || '', zip: (c.address && c.address.zip) || '' } : x.person;
+  const at = isoAgo(x.days, 9);
+  return {
+    id: 'rf' + (i + 1), source: x.source, receivedAt: at, status: x.status, assignee: x.assignee, referrer: x.referrer, reason: x.reason, needs: x.needs || [],
+    clientId: c ? c.id : '', person, statusNote: x.note || '', contactIds: [],
+    attempts: (x.attempts || []).map(([d, result, note], j) => ({ id: 'rf' + (i + 1) + 't' + j, at: isoAgo(d, 14), by: x.assignee || 'u1', result, note })),
+    log: [{ at, by: '', text: 'Received from ' + REFERRAL_SOURCES[x.source] }]
+  };
+}
+function seedReferrals(db) { db.ascReferrals = SAMPLE_REFERRALS.filter((x) => !x.clientId || db.clients.some((c) => c.id === x.clientId)).map((x, i) => referralFrom(db, x, i)); }
+
+const referralView = (db, r) => ({ ...clone(r), assigneeName: r.assignee ? staffLabel(db, r.assignee) : '', enrolled: !!(r.clientId && db.clients.some((c) => c.id === r.clientId && c.colabs.indexOf('ASC') >= 0)) });
+export function listAscReferrals(db) {
+  ensure(db);
+  return db.ascReferrals.slice().sort((a, b) => (a.receivedAt < b.receivedAt ? 1 : -1)).map((r) => referralView(db, r));
+}
+export function updateAscReferral(db, id, body = {}) {
+  ensure(db);
+  const r = findReferral(db, id);
+  const now = new Date().toISOString();
+  if ('status' in body) {
+    if (!REFERRAL_STATUS[body.status]) throw new BadRequest('Unknown referral status.');
+    if (body.status !== r.status) r.log.push({ at: now, by: db.userId, text: 'Marked ' + REFERRAL_STATUS[body.status] + (body.statusNote ? ': ' + String(body.statusNote).trim() : '') });
+    r.status = body.status;
+  }
+  if ('statusNote' in body) r.statusNote = String(body.statusNote || '').trim().slice(0, 1000);
+  if ('assignee' in body) {
+    if (body.assignee && !(db.staff || []).some((s) => s.id === body.assignee)) throw new BadRequest('Unknown coordinator.');
+    if ((body.assignee || '') !== r.assignee) r.log.push({ at: now, by: db.userId, text: body.assignee ? 'Assigned to ' + staffLabel(db, body.assignee) : 'Unassigned' });
+    r.assignee = body.assignee || '';
+  }
+  return referralView(db, r);
+}
+// Prototype only: one more referral arrives, as the import from another program would deliver it.
+const SIMULATED = [
+  { source: 'HMIS', person: { first: 'Terrell', last: 'Banks', dob: '1994-09-30', phone: '412-555-0118', zip: '15212' }, referrer: { name: 'Pat Okafor', role: 'Shelter case manager, Smithfield Street shelter', phone: '412-555-0133' }, reason: 'New to the shelter. Asked about counseling and getting his ID replaced.', needs: ['Mental health, adult'] },
+  { source: 'CYF', clientId: 'c11', referrer: { name: 'Renee Castillo', role: 'CYF caseworker, Central Region office', phone: '412-555-0174' }, reason: 'Grandmother raising two grandchildren. Needs a mental health evaluation for the older one.', needs: ['Mental health services for a child'] },
+  { source: 'HOSP', person: { first: 'Grace', last: 'Liu', dob: '1961-11-02', phone: '412-555-0199', zip: '15217' }, referrer: { name: 'Erin Walsh', role: 'Discharge planner, inpatient psychiatry', phone: '412-555-0157' }, reason: 'Going home tomorrow. Needs an outpatient psychiatrist and help with a ride to the first visit.', needs: ['Mental health, adult', 'Rides to care (MATP)'] }
+];
+export function simulateAscReferral(db) {
+  ensure(db);
+  const n = db.ascReferrals.length;
+  const x = SIMULATED[n % SIMULATED.length];
+  const r = referralFrom(db, { ...x, days: 0, status: 'new', assignee: '' }, n);
+  r.receivedAt = new Date().toISOString(); r.log[0].at = r.receivedAt;
+  while (db.ascReferrals.some((y) => y.id === r.id)) r.id += 'x';
+  db.ascReferrals.unshift(r);
+  return referralView(db, r);
+}
+
+// A call that didn't become a conversation: logged on the action item or referral it was for. Starting a contact
+// is for when they pick up.
+export function addAttempt(db, body = {}) {
+  ensure(db);
+  const t = attemptOf(db, body);
+  if (body.referralId) {
+    const r = findReferral(db, body.referralId);
+    r.attempts.push(t);
+    r.log.push({ at: t.at, by: db.userId, text: 'Call attempt: ' + t.result.toLowerCase() + (t.note ? '. ' + t.note : '') });
+    return { referral: referralView(db, r), action: null };
+  }
+  // A call about nothing on file yet (a check-in from the client's record): the attempt becomes an action item, so
+  // the call to try again shows in Next Up.
+  if (!body.actionId && body.clientId) {
+    const c = findClient(db, body.clientId);
+    const a = { id: newId('a'), clientId: c.id, tag: 'ASC', text: String(body.text || 'Check-in call').slice(0, 300) + ' with ' + c.first, assignee: db.userId, due: isoToday(), done: false, edited: false, createdAt: new Date().toISOString(), status: 'progress', attempts: [t] };
+    db.actions.unshift(a);
+    return { referral: null, action: clone(a) };
+  }
+  const a = db.actions.find((x) => x.id === body.actionId);
+  if (!a) {
+    const k = (db.contacts || []).find((x) => x.actions.some((y) => y.id === body.actionId));
+    if (!k) throw new NotFound('Action item');
+    const own = k.actions.find((y) => y.id === body.actionId); upgradeAction(own); own.attempts.push(t);
+    appendLog(k, [{ key: 'attempt', text: 'Call attempt for “' + own.text + '”: ' + t.result.toLowerCase() }], db.userId);
+    return { referral: null, action: null, contact: full(db, k) };
+  }
+  upgradeAction(a);
+  a.attempts.push(t);
+  if (a.status === 'open') a.status = 'progress';
+  return { referral: null, action: clone(a) };
+}
+
+// A need left "Still open" when its contact closed, resolved later: from the client's ASC tab or the next contact.
+// The contact keeps the outcome it closed with; the resolution is recorded beside it.
+export function resolveNeed(db, contactId, body = {}) {
+  ensure(db);
+  const k = findContact(db, contactId);
+  const n = k.needs.find((x) => x.id === body.needId || x.name === body.need);
+  if (!n) throw new NotFound('Need');
+  if (k.status !== 'closed') throw new BadRequest('This contact is still open. Set the outcome in Wrap Up.');
+  const outcome = String(body.outcome || '');
+  if (!outcome || outcome === OPEN) throw new BadRequest('Choose how the need was resolved.');
+  Object.assign(n, { resolvedAt: new Date().toISOString(), resolvedBy: db.userId, resolution: outcome, resolutionNote: String(body.note || '').trim().slice(0, 1000) });
+  appendLog(k, [{ key: 'need.' + n.id + '.resolved', text: 'Need resolved later: ' + n.name + ', ' + outcome.toLowerCase() + (n.resolutionNote ? '. ' + n.resolutionNote : '') }], db.userId);
+  return { contact: full(db, k), notes: [], actions: [] };
+}
+
+// What to do next, for one coordinator, most pressing first:
+// 1 urgent or crisis needs still open, 2 overdue items, 3 items due today, 4 new referrals, 5 everything else by
+// due date. Within a group, items with more failed call attempts come later, so one person who can't be reached
+// doesn't hold up the rest.
+export function nextUp(db, q = {}) {
+  ensure(db);
+  const who = q.staff || db.userId;
+  const today = isoToday();
+  const name = (c) => (c ? c.first + ' ' + c.last : '');
+  const phoneOf = (c) => (c ? c.phone || '' : '');
+  const items = [];
+  const latest = {};
+  db.contacts.filter((k) => k.clientId && k.status === 'closed').sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1)).forEach((k) => k.needs.forEach((n) => {
+    const key = k.clientId + '|' + n.name;
+    if (key in latest) return;
+    latest[key] = true;
+    if (n.outcome !== OPEN || n.resolvedAt || (n.urg !== 'Urgent' && n.urg !== 'Crisis') || k.staff !== who) return;
+    const c = db.clients.find((x) => x.id === k.clientId);
+    items.push({ key: 'n-' + k.id + '-' + n.id, kind: 'need', rank: 1, why: n.urg + ' need still open since ' + usOf(new Date(k.startedAt)), text: n.name, due: '', attempts: 0, lastAttempt: '', clientId: k.clientId, clientName: name(c), phone: phoneOf(c), contactId: k.id, needId: n.id, actionId: '', referralId: '', status: '' });
+  }));
+  const actionItem = (a, c, contactId) => {
+    const days = a.due ? Math.round((new Date(today) - new Date(a.due)) / DAY) : null;
+    const rank = days == null ? 5 : days > 0 ? 2 : days === 0 ? 3 : 5;
+    const why = days == null ? 'No due date' : days > 0 ? 'Overdue ' + plural(days, 'day', 'days') : days === 0 ? 'Due today' : 'Due ' + weekday(a.due) + ' ' + a.due.slice(5, 7) + '/' + a.due.slice(8, 10);
+    const tries = a.attempts || [];
+    items.push({ key: 'a-' + a.id, kind: 'action', rank, why, text: a.text, due: a.due, attempts: tries.length, lastAttempt: tries.length ? tries[tries.length - 1].result + ', ' + usOf(new Date(tries[tries.length - 1].at)) : '', clientId: c ? c.id : '', clientName: name(c), phone: phoneOf(c), contactId: contactId || '', needId: '', actionId: a.id, referralId: '', status: a.status || 'open' });
+  };
+  db.actions.filter((a) => a.tag === 'ASC' && a.assignee === who && !a.done).forEach((a) => actionItem(a, db.clients.find((c) => c.id === a.clientId), ''));
+  db.contacts.filter((k) => !k.clientId).forEach((k) => k.actions.filter((a) => !a.done && a.assignee === who).forEach((a) => actionItem(a, null, k.id)));
+  db.ascReferrals.filter((r) => r.status === 'new' && (r.assignee === who || !r.assignee)).forEach((r) => {
+    const days = Math.round((Date.now() - new Date(r.receivedAt)) / DAY);
+    const tries = r.attempts;
+    items.push({ key: 'r-' + r.id, kind: 'referral', rank: 4, why: 'New referral from ' + r.source + (days ? ', ' + plural(days, 'day', 'days') + ' ago' : ', today') + (r.assignee ? '' : ' · unassigned'), text: r.reason, due: '', attempts: tries.length, lastAttempt: tries.length ? tries[tries.length - 1].result + ', ' + usOf(new Date(tries[tries.length - 1].at)) : '', clientId: r.clientId, clientName: r.person.first + ' ' + r.person.last, phone: r.person.phone, contactId: '', needId: '', actionId: '', referralId: r.id, status: r.status });
+  });
+  const order = (x) => x.due || '9999';
+  return items.sort((a, b) => a.rank - b.rank || a.attempts - b.attempts || (order(a) < order(b) ? -1 : order(a) > order(b) ? 1 : 0) || a.key.localeCompare(b.key));
 }
